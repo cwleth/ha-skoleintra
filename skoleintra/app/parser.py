@@ -23,8 +23,15 @@ def iso_week(d: date) -> str:
     return f"{w:02d}-{y}"
 
 
+# NB: SkoleIntra sætter "item" direkte efter barnets navn uden skråstreg,
+# fx /parent/<id>/<barn>/item/weeklyplansandhomework/... (verificeret 11-11-2026).
 def weekly_plan_path(child_url: str, d: date) -> str:
-    return f"{child_url}/item/weeklyplansandhomework/item/class/{iso_week(d)}"
+    return f"{child_url}item/weeklyplansandhomework/item/class/{iso_week(d)}"
+
+
+def diary_path(child_url: str, note_id: str | None = None) -> str:
+    base = f"{child_url}item/weeklyplansandhomework/diary"
+    return f"{base}/notes/{note_id}" if note_id else base
 
 
 def client_settings(html: str) -> dict:

@@ -105,28 +105,32 @@ def discover(o: dict) -> int:
     dump("weeklyplan", parser.weekly_plan_path(si.child_url, target_date()))
     summary.append(f"Anmodet uge: {week}")
 
-    # Dagbog: prøv det kendte ID, og saml alle links der ligner dagbog/noter.
-    links = []
-    if index_html:
-        for a in BeautifulSoup(index_html, "lxml").find_all("a", href=True):
-            links.append(f"{a.get_text(' ', strip=True)[:60]} -> {a['href']}")
-    (out / "links.txt").write_text("\n".join(links), "utf-8")
-    diary_links = [l.split(" -> ")[1] for l in links if re.search(r"diary|dagbog|note", l, re.I)]
-    seen = set()
+    # Dagbog ("Lektier"): listesiden + den kendte note. Tekst og links i loggen,
+    # så strukturen kan læses uden adgang til /share.
+    (out / "links.txt").write_text("\n".join(seen_links), "utf-8")
+    pages = [("diary", parser.diary_path(si.child_url))]
     if o.get("diary_id"):
-        known = f"{si.child_url}/diary/notes/{o['diary_id']}"
-        seen.add(known)
-        dump("diary", known)
-    n = 0
-    for href in diary_links:
-        if href.startswith("http"):
-            href = href.split("//", 1)[1].split("/", 1)[1]
-        href = href.strip("/")
-        if href in seen or n >= 3:
+        pages.append(("diary_note", parser.diary_path(si.child_url, o["diary_id"])))
+    for name, path in pages:
+        html = dump(name, path)
+        if not html:
             continue
-        seen.add(href)
-        n += 1
-        dump(f"diary_link{n}", href)
+        soup = BeautifulSoup(html, "lxml")
+        main_el = soup.find("main") or soup.find(id="root") or soup.body or soup
+        for tag in main_el.find_all(["script", "style", "nav", "header", "footer"]):
+            tag.decompose()
+        text = re.sub(r"\n\s*\n+", "\n", main_el.get_text("\n", strip=True))
+        summary.append(f"--- {name}: tekst (første 2500 tegn) ---")
+        summary.append(text[:2500])
+        sub = []
+        for a in main_el.find_all("a", href=True):
+            path_only = urlsplit(a["href"]).path
+            if "weeklyplansandhomework" in path_only and path_only not in sub:
+                sub.append(path_only)
+        summary.append(f"--- {name}: lektie-links ({len(sub)}) ---")
+        summary += [f"  {x}" for x in sub[:40]]
+        classes = sorted({c for el in main_el.find_all(class_=True) for c in el["class"] if c.startswith("sk-")})
+        summary.append(f"--- {name}: sk-klasser: {classes[:60]}")
 
     (out / "summary.txt").write_text("\n".join(summary), "utf-8")
     print("\n".join(summary))
