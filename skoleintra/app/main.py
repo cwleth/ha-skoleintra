@@ -54,6 +54,56 @@ def target_date(today: date | None = None) -> date:
 
 
 # ---------------------------------------------------------------- discover
+DATE_RE = re.compile(r"^\w+dag, \d{1,2}\. \w+\.? \d{4}:?$")
+
+
+def _label(el) -> str:
+    cls = ".".join(el.get("class", []))
+    ident = f"#{el['id']}" if el.get("id") else ""
+    attrs = " ".join(f"{k}" for k in el.attrs if k.startswith("data-"))
+    return f"<{el.name}{ident}{'.' + cls if cls else ''}{' ' + attrs if attrs else ''}>"
+
+
+def dom_skeleton(soup) -> list[str]:
+    """HTML-struktur omkring de to første dato-overskrifter, til at bygge parseren."""
+    heads = [s for s in soup.find_all(string=DATE_RE)][:2]
+    if not heads:
+        return ["--- skeleton: ingen dato-overskrift fundet"]
+    out = ["--- skeleton: forfædre til første dato ---"]
+    el = heads[0].parent
+    chain = [el] + list(el.parents)[:8]
+    out += [f"  {'  ' * i}{_label(a)}" for i, a in enumerate(reversed(chain))]
+    # Find laveste fælles forfader til de to datoer = listen; første barn = én dag.
+    block = heads[0].parent
+    if len(heads) == 2:
+        second = set(id(p) for p in heads[1].parents)
+        for p in heads[0].parents:
+            if id(p) in second:
+                common = p
+                break
+        else:
+            common = None
+        if common is not None:
+            for child in common.children:
+                if getattr(child, "name", None) and heads[0] in child.find_all(string=DATE_RE):
+                    block = child
+                    break
+            out.append(f"--- skeleton: liste-container {_label(common)}")
+    out.append(f"--- skeleton: én dag {_label(block)} ---")
+
+    def walk(node, depth):
+        if depth > 9 or len(out) > 220:
+            return
+        for c in node.children:
+            if getattr(c, "name", None):
+                own = "".join(t for t in c.find_all(string=True, recursive=False)).strip()
+                out.append(f"  {'  ' * depth}{_label(c)} {own[:40]!r}" if own else f"  {'  ' * depth}{_label(c)}")
+                walk(c, depth + 1)
+
+    walk(block, 0)
+    return out
+
+
 def discover(o: dict) -> int:
     out = Path(o.get("dump_dir") or "/share/skoleintra_dump")
     out.mkdir(parents=True, exist_ok=True)
@@ -131,6 +181,7 @@ def discover(o: dict) -> int:
         summary += [f"  {x}" for x in sub[:40]]
         classes = sorted({c for el in main_el.find_all(class_=True) for c in el["class"] if c.startswith("sk-")})
         summary.append(f"--- {name}: sk-klasser: {classes[:60]}")
+        summary += dom_skeleton(BeautifulSoup(html, "lxml"))
 
     (out / "summary.txt").write_text("\n".join(summary), "utf-8")
     print("\n".join(summary))
