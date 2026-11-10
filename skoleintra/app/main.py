@@ -15,6 +15,7 @@ import re
 import sys
 import time
 from datetime import date, datetime, timedelta
+from urllib.parse import urlsplit
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -78,11 +79,28 @@ def discover(o: dict) -> int:
         return r.text
 
     landing = si.ensure_child_url()
-    if landing is not None:
-        (out / "landing.html").write_text(landing.text, "utf-8")
+    if landing is None:  # genbrugt session - hent forsiden for at se hvor vi lander
+        landing = si.get("")
+    (out / "landing.html").write_text(landing.text, "utf-8")
     summary.append(f"child_url: {si.child_url}")
+    summary.append(f"landing: HTTP {landing.status_code}, url={landing.url}")
 
-    index_html = dump("index", si.child_url)
+    index_html = dump("index", f"{si.child_url}/Index") or landing.text
+
+    # Alle links på forsiden til loggen, så stierne kan læses uden adgang til /share.
+    host = urlsplit(landing.url).netloc
+    seen_links = []
+    for a in BeautifulSoup(landing.text + (index_html or ""), "lxml").find_all("a", href=True):
+        href = a["href"]
+        if href.startswith(("#", "javascript:", "mailto:")):
+            continue
+        if href.startswith("http") and urlsplit(href).netloc != host:
+            continue
+        entry = f"  {a.get_text(' ', strip=True)[:50]} -> {urlsplit(href).path}"
+        if entry not in seen_links:
+            seen_links.append(entry)
+    summary.append(f"links ({len(seen_links)}):")
+    summary += seen_links[:120]
     week = parser.iso_week(target_date())
     dump("weeklyplan", parser.weekly_plan_path(si.child_url, target_date()))
     summary.append(f"Anmodet uge: {week}")
