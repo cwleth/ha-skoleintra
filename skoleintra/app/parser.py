@@ -81,6 +81,7 @@ def html_to_text(raw: str | None) -> str:
     for br in soup.find_all("br"):
         br.replace_with("\n")
     for block in soup.find_all(["p", "div", "li", "tr", "h1", "h2", "h3", "h4"]):
+        block.insert(0, "\n")
         block.append("\n")
     text = soup.get_text("")
     text = text.replace("\xa0", " ")
