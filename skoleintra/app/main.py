@@ -192,41 +192,74 @@ def discover(o: dict) -> int:
 
 
 # ---------------------------------------------------------------- normal kørsel
+def resolve_diary(si: SkoleIntra, o: dict) -> tuple[str, str]:
+    """Hent lektiebogen. Prøv det konfigurerede/gemte ID; virker det ikke, find
+    ID'et på listesiden (klassen skifter typisk dagbog ved skoleårets start)."""
+    state = load_json(DATA / "diary.json", {})
+    candidates = [x for x in (o.get("diary_id"), state.get("diary_id")) if x]
+    for did in dict.fromkeys(candidates):
+        r = si.get(parser.diary_path(si.child_url, did))
+        if r.status_code == 200 and "sk-diary-notes-container" in r.text:
+            return did, r.text
+        log.warning("Dagbog %s svarede ikke som forventet (HTTP %s) - leder efter ny", did, r.status_code)
+    listing = si.get(parser.diary_path(si.child_url))
+    ids = parser.diary_ids(listing.text)
+    if not ids:
+        raise parser.ParseError("Ingen lektiebog fundet på siden 'Lektier'.")
+    did = ids[0]
+    r = si.get(parser.diary_path(si.child_url, did))
+    save_json(DATA / "diary.json", {"diary_id": did})
+    log.info("Bruger lektiebog %s", did)
+    return did, r.text
+
+
+def summarize_diary(diary: dict) -> str:
+    n = sum(len(d["lessons"]) for d in diary["days"])
+    return f"{n} punkter de næste {len(diary['days'])} skoledage"[:255]
+
+
 def run_once(o: dict, dry_run: bool = False) -> int:
     si = make_client(o)
     si.ensure_child_url()
-    d = target_date()
-    week = parser.iso_week(d)
-    r = si.get(parser.weekly_plan_path(si.child_url, d))
-    plan = parser.parse_weekly_plan(r.text, week)
-    if plan.get("site_week") and str(d.isocalendar()[1]) not in str(plan["site_week"]):
-        log.warning("Sitet melder uge %r, vi bad om %s - tjek ugenummerering", plan["site_week"], week)
+    now = datetime.now()
+    today = now.date()
+    did, html = resolve_diary(si, o)
+    diary = parser.upcoming(parser.parse_diary(html), today)
+    nxt = parser.next_school_day(diary, today, after_hour=now.hour >= 14)
 
     condensed = None
-    if o.get("anthropic_api_key"):
-        condensed = ai.condense(plan, o["anthropic_api_key"], o["ai_model"], DATA / "ai_cache.json")
-    markdown = ai.to_markdown(condensed, week) if condensed else parser.plan_markdown(plan)
+    if o.get("anthropic_api_key") and diary["days"]:
+        condensed = ai.condense(diary, o["anthropic_api_key"], o["ai_model"], DATA / "ai_cache.json")
+    markdown = ai.to_markdown(condensed, diary["title"]) if condensed else parser.diary_markdown(diary)
+    next_md = parser.diary_markdown({"title": nxt["label"], "days": [nxt]}) if nxt else "Ingen lektier registreret."
 
-    previous = load_json(DATA / "last_plan.json", {})
-    changes = parser.diff(previous, plan)
+    previous = load_json(DATA / "last_diary.json", {})
+    # Kun fremtidige dage i begge, så dage der ruller af ikke ligner ændringer.
+    prev_cut = {**previous, "days": [d for d in previous.get("days", []) if d["date"] >= today.isoformat()]}
+    changes = parser.diff(prev_cut, diary) if previous else []
 
     if dry_run:
-        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        print(json.dumps(diary, ensure_ascii=False, indent=2))
         print("\n--- MARKDOWN ---\n" + markdown)
+        print("\n--- NÆSTE SKOLEDAG ---\n" + next_md)
         print("\n--- ÆNDRINGER ---\n" + ("\n".join(changes) or "(ingen)"))
         return 0
 
-    attrs = {**plan, "changes": changes, "condensed": condensed, "markdown": markdown,
-             "child_url": si.child_url}
     outputs.publish({
-        "ugeplan": (parser.summarize(plan), attrs),
-        "status": ("ok", {"besked": f"Hentet uge {week}", "tidspunkt": now_iso()}),
+        "lektier": (summarize_diary(diary), {**diary, "changes": changes, "condensed": condensed,
+                                             "markdown": markdown, "diary_id": did}),
+        "naeste_skoledag": ((nxt["label"] if nxt else "Ingen lektier"),
+                            {"date": nxt["date"] if nxt else None,
+                             "lessons": nxt["lessons"] if nxt else [],
+                             "duks": nxt.get("duks") if nxt else None,
+                             "markdown": next_md}),
+        "status": ("ok", {"besked": f"Hentet lektiebog {did}", "tidspunkt": now_iso()}),
         "sidst_hentet": (now_iso(), None),
     })
-    if changes and previous:  # første kørsel notificerer ikke
-        title = ("Ny ugeplan" if previous.get("week") != week else "Ugeplan ændret") + f" - uge {week.split('-')[0]}"
-        outputs.notify(o["notify_service"], title, markdown if condensed else "\n".join(changes[:15]))
-    save_json(DATA / "last_plan.json", plan)
+    if changes:
+        outputs.notify(o["notify_service"], "Lektier opdateret",
+                       markdown if condensed else "\n".join(changes[:15]))
+    save_json(DATA / "last_diary.json", diary)
     return 0
 
 

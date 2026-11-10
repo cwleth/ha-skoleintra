@@ -1,7 +1,7 @@
 name: SkoleIntra
-version: "0.2.4"
+version: "0.3.0"
 slug: skoleintra
-description: Henter ugeplan og lektier fra ForældreIntra ind i Home Assistant
+description: Henter lektier fra ForældreIntras lektiebog ind i Home Assistant
 arch:
   - amd64
 init: false

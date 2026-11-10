@@ -160,3 +160,119 @@ def plan_markdown(plan: dict) -> str:
             lines.append(f"### {d['label']}")
             lines += [f"**{l['subject']}**: {l['content']}" for l in d["lessons"]]
     return "\n\n".join(lines)
+
+
+# ---------------------------------------------------------------- lektiebog
+# Verificeret mod skolens ForældreIntra 11-11-2026:
+#   #sk-diary-notes-container > ul.sk-list > li > div.sk-white-box
+#     <b>Onsdag, 18. nov. 2026:</b>
+#     div.sk-user-input  (lærerens frie HTML, typisk tabel FAG | LEKTIER)
+MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "maj": 5, "jun": 6,
+          "jul": 7, "aug": 8, "sep": 9, "okt": 10, "nov": 11, "dec": 12}
+DIARY_DATE = re.compile(r"(\d{1,2})\.\s*([a-zæøå]+)\.?\s*(\d{4})", re.I)
+HEADER_WORDS = {"fag", "lektier", "lektie"}
+
+
+def parse_danish_date(text: str) -> date | None:
+    m = DIARY_DATE.search(text or "")
+    if not m:
+        return None
+    month = MONTHS.get(m.group(2).lower()[:3])
+    if not month:
+        return None
+    try:
+        return date(int(m.group(3)), month, int(m.group(1)))
+    except ValueError:
+        return None
+
+
+def _cell_text(cell) -> str:
+    return html_to_text(str(cell).replace("%", "%25"))  # html_to_text unquoter - beskyt '%'
+
+
+def _items_from_user_input(box) -> tuple[list[dict], str | None]:
+    """Returnér (punkter, duks). Tabelrækker -> fag/tekst, øvrig tekst -> 'Info'."""
+    items, duks = [], None
+    tables = box.find_all("table")
+    for table in tables:
+        for tr in table.find_all("tr"):
+            cells = tr.find_all(["td", "th"], recursive=False)
+            if not cells:
+                continue
+            subject = _cell_text(cells[0]).strip().rstrip(":").strip()
+            text = "\n".join(t for t in (_cell_text(c) for c in cells[1:]) if t).strip()
+            if subject.lower() in HEADER_WORDS and (not text or text.lower() in HEADER_WORDS):
+                continue  # overskriftsrække
+            if subject.lower().startswith("duks"):
+                duks = text or None
+                continue
+            if not text:
+                if subject and len(cells) == 1:
+                    items.append({"subject": "Info", "content": subject})
+                continue  # fag uden lektie
+            items.append({"subject": subject.title() if subject.isupper() else (subject or "Info"),
+                          "content": text})
+        table.decompose()
+    rest = _cell_text(box).strip()
+    if rest:
+        items.insert(0, {"subject": "Info", "content": rest})
+    return items, duks
+
+
+def parse_diary(html: str) -> dict:
+    soup = BeautifulSoup(html, "lxml")
+    container = soup.find(id="sk-diary-notes-container")
+    if container is None:
+        raise ParseError("Ingen #sk-diary-notes-container på siden - layoutet kan være ændret.")
+    title_el = soup.find(string=re.compile(r"Lektiebog", re.I))
+    days = []
+    for li in container.select("ul.sk-list > li"):
+        box = li.find(class_="sk-white-box") or li
+        head = box.find("b")
+        label = head.get_text(" ", strip=True).rstrip(":") if head else ""
+        d = parse_danish_date(label)
+        user_input = box.find(class_="sk-user-input")
+        if d is None or user_input is None:
+            continue
+        items, duks = _items_from_user_input(user_input)
+        days.append({"date": d.isoformat(), "label": label, "lessons": items, "duks": duks})
+    days.sort(key=lambda x: x["date"])
+    return {"title": title_el.strip() if title_el else "Lektiebog", "days": days}
+
+
+def upcoming(diary: dict, today: date, horizon_days: int = 14) -> dict:
+    """Kun dage fra i dag og frem (inden for horisonten) - det er det, der er handling på."""
+    end = today.toordinal() + horizon_days
+    days = [d for d in diary["days"]
+            if today.isoformat() <= d["date"] and date.fromisoformat(d["date"]).toordinal() <= end]
+    return {**diary, "days": days, "general": []}
+
+
+def next_school_day(diary: dict, today: date, after_hour: bool) -> dict | None:
+    """Næste dag med indhold. Efter skoletid (after_hour) springes i dag over."""
+    for d in diary["days"]:
+        if d["date"] > today.isoformat() or (d["date"] == today.isoformat() and not after_hour):
+            if d["lessons"]:
+                return d
+    return None
+
+
+def diary_markdown(diary: dict, max_days: int = 7) -> str:
+    out = [f"## {diary.get('title') or 'Lektiebog'}"]
+    shown = [d for d in diary["days"] if d["lessons"]][:max_days]
+    if not shown:
+        out.append("Ingen lektier registreret.")
+    for d in shown:
+        out.append(f"### {d['label']}")
+        out += [f"**{l['subject']}**: {l['content']}" for l in d["lessons"]]
+    return "\n\n".join(out)
+
+
+def diary_ids(html: str) -> list[str]:
+    """Dagbogs-ID'er fra listesiden (.../diary/120 eller .../diary/notes/120)."""
+    ids = []
+    for a in BeautifulSoup(html, "lxml").find_all("a", href=True):
+        m = re.search(r"/diary/(?:notes/)?(\d+)(?:/|$)", a["href"])
+        if m and m.group(1) not in ids:
+            ids.append(m.group(1))
+    return ids

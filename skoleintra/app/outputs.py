@@ -18,9 +18,10 @@ DEVICE = {
     "manufacturer": "ForældreIntra",
     "model": "Ugeplan-scraper",
 }
-# Enhedsnavn "SkoleIntra" + entitetsnavn "Ugeplan" -> sensor.skoleintra_ugeplan
+# Enhedsnavn "SkoleIntra" + entitetsnavn "Lektier" -> sensor.skoleintra_lektier
 SENSORS = {
-    "ugeplan": {"name": "Ugeplan", "icon": "mdi:school", "attrs": True},
+    "lektier": {"name": "Lektier", "icon": "mdi:school", "attrs": True},
+    "naeste_skoledag": {"name": "Næste skoledag", "icon": "mdi:calendar-today", "attrs": True},
     "status": {"name": "Status", "icon": "mdi:information-outline", "attrs": True,
                "entity_category": "diagnostic"},
     "sidst_hentet": {"name": "Sidst hentet", "device_class": "timestamp",

@@ -11,7 +11,7 @@ from pathlib import Path
 
 log = logging.getLogger("skoleintra.ai")
 
-SYSTEM = """Du omskriver en dansk skoles ugeplan til et kort, handlingsorienteret overblik for en forælder.
+SYSTEM = """Du omskriver en dansk skoles lektiebog til et kort, handlingsorienteret overblik for en forælder.
 
 Returnér KUN gyldig JSON med præcis denne struktur:
 {"overblik": "1-2 sætninger",
@@ -27,7 +27,7 @@ Regler:
 
 
 def condense(plan: dict, api_key: str, model: str, cache_file: Path) -> dict | None:
-    raw = json.dumps({k: plan[k] for k in ("general", "days")}, ensure_ascii=False, sort_keys=True)
+    raw = json.dumps({"days": plan["days"]}, ensure_ascii=False, sort_keys=True)
     key = hashlib.sha256(f"{model}\0{raw}".encode()).hexdigest()
     try:
         cache = json.loads(cache_file.read_text("utf-8"))
@@ -60,8 +60,8 @@ def condense(plan: dict, api_key: str, model: str, cache_file: Path) -> dict | N
     return result
 
 
-def to_markdown(c: dict, week: str) -> str:
-    out = [f"## Uge {week.split('-')[0]}"]
+def to_markdown(c: dict, title: str) -> str:
+    out = [f"## {title}"]
     if c.get("overblik"):
         out.append(c["overblik"])
     if c.get("vigtigt"):

@@ -1,11 +1,10 @@
-# SkoleIntra add-on (lokal)
+# SkoleIntra add-on
 
-Henter ugeplanen fra ForældreIntra og lægger den i Home Assistant via MQTT discovery.
+Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i Home Assistant via MQTT discovery. Klassens ugeplan bruges ikke: Skolen giver forældre `notauthorized` på den.
 
 ## Installation
-1. Kopiér mappen `skoleintra` ind i Samba-sharet `addons`.
-2. Indstillinger → Tilføjelsesprogrammer → Butik → ⋮ → Søg efter opdateringer.
-   "SkoleIntra" ligger under Lokale tilføjelsesprogrammer → Installér.
+1. Tilføj `https://github.com/cwleth/ha-skoleintra` under Butik → ⋮ → Lagre.
+2. Installér "SkoleIntra".
 3. Konfiguration: udfyld brugernavn og kode. Lad `mode: discover` stå → Start.
 4. Når parseren er bekræftet: `mode: once` → Start (opretter sensorerne).
 5. Drift: `mode: schedule`, slå "Start ved opstart" og "Watchdog" til.
@@ -19,7 +18,8 @@ Henter ugeplanen fra ForældreIntra og lægger den i Home Assistant via MQTT dis
 | schedule | kører på `run_at`-tidspunkterne, bliver kørende |
 
 ## Entiteter (enheden "SkoleIntra")
-- `sensor.skoleintra_ugeplan` – state "Uge 46: 12 punkter", hele planen i attributter (`markdown`, `days`, `general`, `changes`, `condensed`)
+- `sensor.skoleintra_lektier` – state "4 punkter de næste 3 skoledage"; attributter `days`, `markdown`, `changes`, `condensed`, `diary_id` (14 dage frem)
+- `sensor.skoleintra_naeste_skoledag` – næste dag med lektier (efter kl. 14 springes i dag over); attributter `date`, `lessons`, `markdown`
 - `sensor.skoleintra_status` – ok / login_afvist / login_blokeret / bot_blokeret / login_ikke_understoettet / fejl
 - `sensor.skoleintra_sidst_hentet` – tidsstempel for seneste vellykkede hentning
 
@@ -28,7 +28,7 @@ Sensorerne er retained MQTT og overlever genstart af HA.
 Dashboard-kort (Markdown-kort):
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.skoleintra_ugeplan', 'markdown') }}"
+content: "{{ state_attr('sensor.skoleintra_lektier', 'markdown') }}"
 ```
 
 ## Loginværn
@@ -41,7 +41,10 @@ Ved blokering: log ind manuelt i browseren én gang, ret evt. koden, slå
 `reset_login_guard` til, start, og slå den fra igen. Nulstillingen virker kun én
 gang pr. gang den slås til.
 
-## Ikke verificeret endnu
-- Ugeplan-URL'en med ISO-uge (`.../item/class/46-2026`) mod det rigtige site.
-- Dagbogen: kun dump, ingen parser før strukturen kendes.
-- Byg på HAOS og MQTT mod den rigtige Mosquitto.
+## Lektiebogs-ID
+Findes automatisk på siden Lektier og gemmes. Hvis ID'et holder op med at virke
+(fx ved nyt skoleår), findes det nye automatisk. `diary_id` kan låse det.
+
+## Stier (verificeret 11-11-2026)
+SkoleIntra sætter `item` direkte efter barnets navn uden skråstreg:
+`/parent/<id>/<navn>item/weeklyplansandhomework/diary/notes/<dagbogs-id>`
