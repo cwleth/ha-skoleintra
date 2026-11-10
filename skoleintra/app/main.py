@@ -319,7 +319,7 @@ def next_run(times: list[tuple[int, int]], now: datetime) -> datetime:
 
 def schedule(o: dict) -> int:
     times = parse_times(o["run_at"])
-    if not (DATA / "last_plan.json").exists():
+    if not (DATA / "last_diary.json").exists():
         log.info("Ingen tidligere plan - kører med det samme")
         safe_run(o)
     while True:
