@@ -231,7 +231,7 @@ def run_once(o: dict, dry_run: bool = False) -> int:
     if o.get("anthropic_api_key") and diary["days"]:
         condensed = ai.condense(diary, o["anthropic_api_key"], o["ai_model"], DATA / "ai_cache.json")
     markdown = ai.to_markdown(condensed, diary["title"]) if condensed else parser.diary_markdown(diary)
-    next_md = parser.diary_markdown({"title": nxt["label"], "days": [nxt]}) if nxt else "Ingen lektier registreret."
+    next_md = parser.diary_markdown({"title": "Næste skoledag", "days": [nxt]}) if nxt else "Ingen lektier registreret."
 
     previous = load_json(DATA / "last_diary.json", {})
     # Kun fremtidige dage i begge, så dage der ruller af ikke ligner ændringer.
@@ -337,6 +337,8 @@ def main() -> int:
         return 1
     logging.basicConfig(level=o.get("log_level", "INFO"),
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    # paho logger en falsk ERROR ved lukning efter publish.multiple; rigtige fejl kaster exceptions.
+    logging.getLogger("paho.mqtt.client").setLevel(logging.CRITICAL)
     if not o.get("username") or not o.get("password"):
         log.error("username/password er ikke udfyldt. Stopper UDEN loginforsøg.")
         return 1
