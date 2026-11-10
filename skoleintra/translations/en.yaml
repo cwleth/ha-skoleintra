@@ -1,0 +1,31 @@
+configuration:
+  mode:
+    name: Mode
+    description: "discover = dump sider til /share/skoleintra_dump. dry-run = test uden HA. once = én kørsel. schedule = drift."
+  base_url:
+    name: Skolens SkoleIntra-adresse
+  username:
+    name: ForældreIntra-brugernavn
+  password:
+    name: ForældreIntra-kode
+  child_url:
+    name: Barnets URL (valgfri)
+    description: "Fx parent/1234/Navn. Udledes automatisk ved login."
+  diary_id:
+    name: Dagbogs-ID (valgfri)
+  notify_service:
+    name: Notify-service
+    description: "Fx notify.mobile_app_din_telefon"
+  run_at:
+    name: Kørselstidspunkter
+    description: "Kommasepareret, fx 06:30,15:00. Hyppigere kørsel udløser SkoleIntras bot-beskyttelse."
+  anthropic_api_key:
+    name: Anthropic API-nøgle (valgfri)
+    description: "Tom = ingen AI-kondensering."
+  ai_model:
+    name: AI-model
+  reset_login_guard:
+    name: Nulstil loginværn
+    description: "Slå til efter du har tjekket koden manuelt i browseren. Virker én gang - slå fra igen bagefter."
+  log_level:
+    name: Logniveau

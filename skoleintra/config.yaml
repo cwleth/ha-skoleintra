@@ -1,0 +1,37 @@
+name: SkoleIntra
+version: "0.2.0"
+slug: skoleintra
+description: Henter ugeplan og lektier fra ForældreIntra ind i Home Assistant
+arch:
+  - amd64
+init: false
+startup: application
+# Manuel indtil parseren er verificeret. Slå "Start ved opstart" til i UI'et
+# når mode står på schedule.
+boot: manual
+homeassistant_api: true
+hassio_api: true
+services:
+  - mqtt:need
+map:
+  - share:rw
+options:
+  mode: discover
+  notify_service: notify.persistent_notification
+  run_at: "06:30,15:00"
+  ai_model: claude-haiku-5-5
+  reset_login_guard: false
+  log_level: INFO
+schema:
+  mode: list(discover|dry-run|once|schedule)
+  base_url: url
+  username: str
+  password: password
+  child_url: str?
+  diary_id: str?
+  notify_service: str
+  run_at: match(^\d{1,2}:\d{2}(,\s*\d{1,2}:\d{2})*$)
+  anthropic_api_key: password?
+  ai_model: str
+  reset_login_guard: bool
+  log_level: list(DEBUG|INFO|WARNING)

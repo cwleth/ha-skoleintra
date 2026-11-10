@@ -1,0 +1,258 @@
+"""Entrypoint for add-on'en. Mode vælges i konfigurationen:
+
+  discover  - log ind, dump sider til /share/skoleintra_dump, afslut
+  dry-run   - hent og parse, skriv til loggen, rør ikke HA
+  once      - én fuld kørsel (sensor + evt. notifikation), afslut
+  schedule  - kør på tidspunkterne i run_at, bliv kørende
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import sys
+import time
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+from bs4 import BeautifulSoup
+
+from . import ai, outputs, parser
+from .client import LoginBlocked, LoginRejected, SkoleIntra, SkoleIntraError, UnsupportedLogin
+
+DATA = Path(os.environ.get("SI_DATA_DIR", "/data"))
+OPTIONS = Path(os.environ.get("SI_OPTIONS_FILE", DATA / "options.json"))
+log = logging.getLogger("skoleintra")
+
+
+def load_json(p: Path, default):
+    try:
+        return json.loads(p.read_text("utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(p: Path, obj) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), "utf-8")
+
+
+def now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def make_client(o: dict) -> SkoleIntra:
+    return SkoleIntra(o["base_url"], o["username"], o["password"], DATA, o.get("child_url"))
+
+
+def target_date(today: date | None = None) -> date:
+    today = today or date.today()
+    return today + timedelta(days=7) if today.weekday() >= 5 else today  # weekend -> næste uge
+
+
+# ---------------------------------------------------------------- discover
+def discover(o: dict) -> int:
+    out = Path(o.get("dump_dir") or "/share/skoleintra_dump")
+    out.mkdir(parents=True, exist_ok=True)
+    si = make_client(o)
+    summary = []
+
+    def dump(name: str, path: str) -> str | None:
+        try:
+            r = si.get(path)
+        except SkoleIntraError:
+            raise
+        except Exception as e:
+            summary.append(f"{name}: FEJL {e}")
+            return None
+        (out / f"{name}.html").write_text(r.text, "utf-8")
+        settings = parser.client_settings(r.text)
+        for k, v in settings.items():
+            save_json(out / f"{name}.{k}.json", v)
+        summary.append(
+            f"{name}: HTTP {r.status_code}, {len(r.text)} tegn, url={r.url}, "
+            f"settings={sorted(settings) or 'ingen'}"
+        )
+        return r.text
+
+    landing = si.ensure_child_url()
+    if landing is not None:
+        (out / "landing.html").write_text(landing.text, "utf-8")
+    summary.append(f"child_url: {si.child_url}")
+
+    index_html = dump("index", si.child_url)
+    week = parser.iso_week(target_date())
+    dump("weeklyplan", parser.weekly_plan_path(si.child_url, target_date()))
+    summary.append(f"Anmodet uge: {week}")
+
+    # Dagbog: prøv det kendte ID, og saml alle links der ligner dagbog/noter.
+    links = []
+    if index_html:
+        for a in BeautifulSoup(index_html, "lxml").find_all("a", href=True):
+            links.append(f"{a.get_text(' ', strip=True)[:60]} -> {a['href']}")
+    (out / "links.txt").write_text("\n".join(links), "utf-8")
+    diary_links = [l.split(" -> ")[1] for l in links if re.search(r"diary|dagbog|note", l, re.I)]
+    seen = set()
+    if o.get("diary_id"):
+        known = f"{si.child_url}/diary/notes/{o['diary_id']}"
+        seen.add(known)
+        dump("diary", known)
+    n = 0
+    for href in diary_links:
+        if href.startswith("http"):
+            href = href.split("//", 1)[1].split("/", 1)[1]
+        href = href.strip("/")
+        if href in seen or n >= 3:
+            continue
+        seen.add(href)
+        n += 1
+        dump(f"diary_link{n}", href)
+
+    (out / "summary.txt").write_text("\n".join(summary), "utf-8")
+    print("\n".join(summary))
+    print(f"\nDump skrevet til {out}")
+    return 0
+
+
+# ---------------------------------------------------------------- normal kørsel
+def run_once(o: dict, dry_run: bool = False) -> int:
+    si = make_client(o)
+    si.ensure_child_url()
+    d = target_date()
+    week = parser.iso_week(d)
+    r = si.get(parser.weekly_plan_path(si.child_url, d))
+    plan = parser.parse_weekly_plan(r.text, week)
+    if plan.get("site_week") and str(d.isocalendar()[1]) not in str(plan["site_week"]):
+        log.warning("Sitet melder uge %r, vi bad om %s - tjek ugenummerering", plan["site_week"], week)
+
+    condensed = None
+    if o.get("anthropic_api_key"):
+        condensed = ai.condense(plan, o["anthropic_api_key"], o["ai_model"], DATA / "ai_cache.json")
+    markdown = ai.to_markdown(condensed, week) if condensed else parser.plan_markdown(plan)
+
+    previous = load_json(DATA / "last_plan.json", {})
+    changes = parser.diff(previous, plan)
+
+    if dry_run:
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        print("\n--- MARKDOWN ---\n" + markdown)
+        print("\n--- ÆNDRINGER ---\n" + ("\n".join(changes) or "(ingen)"))
+        return 0
+
+    attrs = {**plan, "changes": changes, "condensed": condensed, "markdown": markdown,
+             "child_url": si.child_url}
+    outputs.publish({
+        "ugeplan": (parser.summarize(plan), attrs),
+        "status": ("ok", {"besked": f"Hentet uge {week}", "tidspunkt": now_iso()}),
+        "sidst_hentet": (now_iso(), None),
+    })
+    if changes and previous:  # første kørsel notificerer ikke
+        title = ("Ny ugeplan" if previous.get("week") != week else "Ugeplan ændret") + f" - uge {week.split('-')[0]}"
+        outputs.notify(o["notify_service"], title, markdown if condensed else "\n".join(changes[:15]))
+    save_json(DATA / "last_plan.json", plan)
+    return 0
+
+
+def report_failure(o: dict, e: Exception) -> None:
+    status = getattr(e, "status", "fejl")
+    msg = str(e) or e.__class__.__name__
+    log.error("%s: %s", status, msg)
+    try:
+        outputs.publish({"status": (status, {"besked": msg, "tidspunkt": now_iso()})})
+    except Exception as pe:
+        log.warning("Kunne ikke publicere status: %s", pe)
+    # Login-problemer kræver handling - notificér, men kun når status skifter.
+    last = load_json(DATA / "last_status.json", {})
+    if isinstance(e, (LoginRejected, LoginBlocked, UnsupportedLogin)) and last.get("status") != status:
+        try:
+            outputs.notify(o["notify_service"], "SkoleIntra: login stoppet", msg)
+        except Exception as ne:
+            log.warning("Kunne ikke sende notifikation: %s", ne)
+    save_json(DATA / "last_status.json", {"status": status})
+
+
+def safe_run(o: dict, dry_run: bool = False) -> int:
+    try:
+        rc = run_once(o, dry_run)
+        if not dry_run:
+            save_json(DATA / "last_status.json", {"status": "ok"})
+        return rc
+    except Exception as e:
+        if dry_run:
+            log.exception("Dry-run fejlede")
+            return 1
+        report_failure(o, e)
+        if not isinstance(e, SkoleIntraError):
+            log.exception("Uventet fejl")
+        return 1
+
+
+# ---------------------------------------------------------------- planlægning
+def parse_times(spec: str) -> list[tuple[int, int]]:
+    times = []
+    for part in spec.split(","):
+        h, m = part.strip().split(":")
+        times.append((int(h), int(m)))
+    if not times:
+        raise ValueError("run_at er tom")
+    return sorted(times)
+
+
+def next_run(times: list[tuple[int, int]], now: datetime) -> datetime:
+    for day in range(2):
+        for h, m in times:
+            t = (now + timedelta(days=day)).replace(hour=h, minute=m, second=0, microsecond=0)
+            if t > now:
+                return t
+    raise RuntimeError("unreachable")
+
+
+def schedule(o: dict) -> int:
+    times = parse_times(o["run_at"])
+    if not (DATA / "last_plan.json").exists():
+        log.info("Ingen tidligere plan - kører med det samme")
+        safe_run(o)
+    while True:
+        t = next_run(times, datetime.now())
+        log.info("Næste kørsel %s", t.strftime("%d-%m-%Y %H:%M"))
+        time.sleep(max(1, (t - datetime.now()).total_seconds()))
+        safe_run(o)
+
+
+# ---------------------------------------------------------------- main
+def main() -> int:
+    o = load_json(OPTIONS, None)
+    if o is None:
+        print(f"Kan ikke læse {OPTIONS}")
+        return 1
+    logging.basicConfig(level=o.get("log_level", "INFO"),
+                        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    if not o.get("username") or not o.get("password"):
+        log.error("username/password er ikke udfyldt. Stopper UDEN loginforsøg.")
+        return 1
+
+    if make_client(o).guard.handle_reset_option(bool(o.get("reset_login_guard"))):
+        log.warning("Loginværnet er nulstillet. Slå reset_login_guard FRA igen.")
+
+    mode = o.get("mode", "discover")
+    log.info("Mode: %s", mode)
+    if mode == "discover":
+        try:
+            return discover(o)
+        except SkoleIntraError as e:
+            report_failure(o, e)
+            return 1
+    if mode == "dry-run":
+        return safe_run(o, dry_run=True)
+    if mode == "once":
+        return safe_run(o)
+    if mode == "schedule":
+        return schedule(o)
+    log.error("Ukendt mode: %s", mode)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
