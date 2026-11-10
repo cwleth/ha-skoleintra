@@ -181,7 +181,9 @@ def discover(o: dict) -> int:
         summary += [f"  {x}" for x in sub[:40]]
         classes = sorted({c for el in main_el.find_all(class_=True) for c in el["class"] if c.startswith("sk-")})
         summary.append(f"--- {name}: sk-klasser: {classes[:60]}")
-        summary += dom_skeleton(BeautifulSoup(html, "lxml"))
+        for key, val in parser.client_settings(html).items():
+            summary.append(f"--- {name}: JSON {key} ---")
+            summary += parser.describe(val)
 
     (out / "summary.txt").write_text("\n".join(summary), "utf-8")
     print("\n".join(summary))

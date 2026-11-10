@@ -35,19 +35,42 @@ def diary_path(child_url: str, note_id: str | None = None) -> str:
 
 
 def client_settings(html: str) -> dict:
-    """Alle data-clientlogic-settings-*-blokke på #root, nøgle i lowercase.
-    (lxml lowercaser attributnavne, så 'WeeklyPlansApp' bliver 'weeklyplansapp'.)"""
-    root = BeautifulSoup(html, "lxml").find(id="root")
+    """Alle data-clientlogic-settings-*-blokke på siden (ikke kun #root), nøgle i
+    lowercase. lxml lowercaser attributnavne: 'WeeklyPlansApp' -> 'weeklyplansapp'."""
     out: dict = {}
-    if root is None:
-        return out
-    for attr, val in root.attrs.items():
-        if attr.lower().startswith(PREFIX):
-            try:
-                out[attr[len(PREFIX):].lower()] = json.loads(val)
-            except (TypeError, ValueError):
-                out[attr[len(PREFIX):].lower()] = val
+    for el in BeautifulSoup(html, "lxml").find_all(True):
+        for attr, val in el.attrs.items():
+            if attr.lower().startswith(PREFIX):
+                key = attr[len(PREFIX):].lower()
+                try:
+                    out[key] = json.loads(val)
+                except (TypeError, ValueError):
+                    out[key] = val
     return out
+
+
+def describe(obj, depth: int = 0, max_depth: int = 4) -> list[str]:
+    """Kompakt strukturbeskrivelse af JSON til loggen."""
+    pad = "  " * depth
+    if depth > max_depth:
+        return [f"{pad}..."]
+    if isinstance(obj, dict):
+        lines = []
+        for k, v in list(obj.items())[:40]:
+            if isinstance(v, (dict, list)):
+                kind = f"list[{len(v)}]" if isinstance(v, list) else "dict"
+                lines.append(f"{pad}{k}: {kind}")
+                lines += describe(v, depth + 1, max_depth)
+            else:
+                lines.append(f"{pad}{k}: {str(v)[:90]!r}")
+        return lines
+    if isinstance(obj, list):
+        lines = []
+        for i, v in enumerate(obj[:2]):
+            lines.append(f"{pad}[{i}]")
+            lines += describe(v, depth + 1, max_depth)
+        return lines
+    return [f"{pad}{str(obj)[:90]!r}"]
 
 
 def html_to_text(raw: str | None) -> str:
