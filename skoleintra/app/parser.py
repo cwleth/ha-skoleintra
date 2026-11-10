@@ -201,8 +201,14 @@ def _items_from_user_input(box) -> tuple[list[dict], str | None]:
                 continue
             subject = _cell_text(cells[0]).strip().rstrip(":").strip()
             text = "\n".join(t for t in (_cell_text(c) for c in cells[1:]) if t).strip()
-            if subject.lower() in HEADER_WORDS and (not text or text.lower() in HEADER_WORDS):
-                continue  # overskriftsrække
+            if subject.lower() in HEADER_WORDS:
+                # Overskriftsrække - men lærere skriver nogle gange en note i den.
+                note = "\n".join(
+                    ln for ln in text.split("\n") if ln.strip().lower() not in HEADER_WORDS
+                ).strip()
+                if note:
+                    items.append({"subject": "Info", "content": note})
+                continue
             if subject.lower().startswith("duks"):
                 duks = text or None
                 continue
