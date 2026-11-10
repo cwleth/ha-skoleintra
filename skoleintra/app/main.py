@@ -348,6 +348,13 @@ def main() -> int:
 
     mode = o.get("mode", "discover")
     log.info("Mode: %s", mode)
+    # Discover-dumpet indeholder persondata - ryd det, så snart vi er i drift.
+    dump_dir = Path(o.get("dump_dir") or "/share/skoleintra_dump")
+    if mode != "discover" and dump_dir.exists():
+        import shutil
+
+        shutil.rmtree(dump_dir, ignore_errors=True)
+        log.info("Slettede discover-dump %s (exists=%s)", dump_dir, dump_dir.exists())
     if mode == "discover":
         try:
             return discover(o)
