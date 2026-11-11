@@ -368,6 +368,54 @@ def _pages_only(text: str, max_len: int) -> str:
     return out if len(out) <= max_len else ""
 
 
+def condense(content: str) -> str:
+    """Lærerens tekst uden støj, opgavelinjen først. Til lille skrift under to-do-linjen.
+    Fjerner 'Lektie til i dag:', skillestreger, links og tilmeldingslinjer."""
+    lines = []
+    for ln in (content or "").split("\n"):
+        ln = re.sub(r"^\s*lektie til i ?dag:?\s*", "", ln.strip(), flags=re.I)
+        ln = re.sub(r"https?://\S+", "", ln).strip()
+        ln = re.sub(r"\s+\.\s+", " · ", ln)              # "Topic Book . Læs" -> "Topic Book · Læs"
+        ln = re.sub(r"\s{2,}", " ", ln).strip(" :")
+        if not ln or _DROP.match(ln) or re.match(r"^man kan tilmelde sig", ln, re.I):
+            continue
+        lines.append(ln)
+    if not lines:
+        return ""
+    best = max(_score(ln) for ln in lines)
+    first = [ln for ln in lines if _score(ln) == best]
+    rest = sorted((ln for ln in lines if _score(ln) != best), key=_score, reverse=True)  # HUSK/datoer før baggrund
+    return "\n".join(first + rest)
+
+
+_DAYS = {"man": 0, "tir": 1, "ons": 2, "tor": 3, "fre": 4, "lør": 5, "lor": 5, "søn": 6, "son": 6}
+
+
+def parse_subject_days(spec: str | None) -> dict[str, set[int]]:
+    """'Skak:man, Svømning:tir+tor' -> {'skoleskak': {0}, 'svømning': {1, 3}}."""
+    rules = {}
+    for part in (spec or "").split(","):
+        if ":" not in part:
+            continue
+        subj, days = part.split(":", 1)
+        wd = {_DAYS[d.strip().lower()[:3]] for d in days.split("+") if d.strip().lower()[:3] in _DAYS}
+        if subj.strip() and wd:
+            rules[subj.strip().lower()] = wd
+    return rules
+
+
+def filter_subject_days(diary: dict, rules: dict[str, set[int]]) -> dict:
+    """Fjern fag på dage, hvor barnet ikke har det (fx skak for både mandags- og onsdagsholdet)."""
+    if not rules:
+        return diary
+    days = []
+    for d in diary["days"]:
+        wd = date.fromisoformat(d["date"]).weekday()
+        lessons = [l for l in d["lessons"] if wd in rules.get(l["subject"].strip().lower(), {wd})]
+        days.append({**d, "lessons": lessons})
+    return {**diary, "days": days}
+
+
 def add_short(diary: dict) -> dict:
     for d in diary.get("days", []):
         for l in d.get("lessons", []):

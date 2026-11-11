@@ -26,7 +26,7 @@ BACKLOG = "todo.lektier_backlog"
 LEGACY = "todo.lektier"          # tidligere samleliste - tømmes ved migrering
 KEEP_BACKLOG_DONE_DAYS = 14
 SUMMARY_MAX = 38                 # én linje i to-do-kortet på en telefon (~390 px)
-VERSION = "6"   # hæves -> åbne/afkrydsede poster i dag-listerne genskabes i nyt format
+VERSION = "7"   # hæves -> åbne/afkrydsede poster i dag-listerne genskabes i nyt format
 
 
 def _items(entity: str) -> list[dict]:
@@ -105,7 +105,7 @@ def slot_sensors(diary: dict, today: date) -> dict:
 
 def _add(entity: str, summ: str, due: str | None, done: bool = False, description: str | None = None) -> str | None:
     """due=None for dag-listerne: dagen står i overskriften, så frist under hver linje er støj.
-    description = lærerens fulde tekst; skjules i listen og vises i pop-up ved tryk."""
+    description = lærerens tekst, kondenseret (parser.condense) - vises med lille skrift under linjen."""
     known = {i["uid"] for i in _items(entity)}
     data = {"entity_id": entity, "item": summ}
     if due:
@@ -147,7 +147,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
     wanted = {}
     for idx, d in enumerate(slot_days(diary, today)):
         for l in homework(d):
-            wanted[f"{d['date']}|{l['subject']}"] = (SLOTS[idx], summary(l), d["date"], _hash(l["content"]), l["content"])
+            wanted[f"{d['date']}|{l['subject']}"] = (SLOTS[idx], summary(l), d["date"], _hash(l["content"]), parser.condense(l["content"]) or l["content"])
 
     # 1: eksisterende poster - passerede, flyttede, ændrede, fjernede
     for key, entry in list(state.items()):

@@ -24,6 +24,9 @@ configuration:
     description: "Tom = ingen AI-kondensering."
   ai_model:
     name: AI-model
+  subject_days:
+    name: Fag kun på bestemte ugedage
+    description: Fx "Skak:man" eller "Skak:man, Svømning:tir+tor". Indlæg for faget på andre dage (andre hold) sorteres fra.
   reset_login_guard:
     name: Nulstil loginværn
     description: "Slå til efter du har tjekket koden manuelt i browseren. Virker én gang - slå fra igen bagefter."

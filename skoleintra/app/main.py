@@ -224,7 +224,8 @@ def run_once(o: dict, dry_run: bool = False) -> int:
     now = datetime.now()
     today = now.date()
     did, html = resolve_diary(si, o)
-    diary = parser.add_short(parser.upcoming(parser.parse_diary(html), today))
+    diary = parser.upcoming(parser.parse_diary(html), today)
+    diary = parser.add_short(parser.filter_subject_days(diary, parser.parse_subject_days(o.get("subject_days"))))
     nxt = parser.next_school_day(diary, today, after_hour=now.hour >= 14)
 
     condensed = None

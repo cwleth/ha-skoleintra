@@ -28,9 +28,12 @@ Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i H
 - Afkrydsede lektier bliver stående (overstreget), indtil dagen er gået. Herefter fjernes de, og åbne lektier flyttes til `todo.lektier_backlog`.
 - Backlog: afkrydsede poster bliver stående resten af dagen og ryddes næste morgen.
 - **Info vs. lektier:** faget "Info" og varsler ("lektie … til næste uge" uden "i dag") bliver ikke til to-do-poster. De vises som noter på dagen via `sensor.skoleintra_dag_N`.
-- Lærerens fulde tekst ligger i postens beskrivelse (vises i pop-up ved tryk, når kortet har `item_tap_action: edit`).
+- Lærerens tekst ligger kondenseret i postens beskrivelse (opgavelinjen først, uden links og støj) - vises med lille skrift under linjen. Den fulde tekst ligger i `sensor.skoleintra_dag_N` (attribut `full`).
 - Én kort linje pr. lektie (≤ 38 tegn; lange tekster med sidetal bliver til fx "Skakbogen s. 14+15").
 - Slå fra med `todo_sync: false`.
+
+## Fag kun på bestemte dage
+`subject_days: "Skak:man"` sorterer indlæg for faget fra på andre ugedage (fx når lektiebogen indeholder både mandags- og onsdagsholdet). Flere: `"Skak:man, Svømning:tir+tor"`.
 
 ## Dag-sensorer (til dashboardet)
 - `sensor.skoleintra_dag_1` … `_7`: state = antal lektier den dag (afkrydsede tæller med), `-1` = ingen dag i pladsen. Attributter: `date`, `notes`, `full` (lærerens fulde tekst pr. fag, til fold-ud).
