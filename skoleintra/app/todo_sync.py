@@ -31,8 +31,23 @@ def _items(entity: str) -> list[dict]:
     return (resp.get(entity) or {}).get("items", [])
 
 
+DESC_VERSION = "2"  # hæv for at genskrive beskrivelser på åbne poster
+
+
 def _hash(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()[:16]
+    return hashlib.sha256((DESC_VERSION + text).encode()).hexdigest()[:16]
+
+
+def _description(lesson: dict) -> str:
+    """Fuld tekst uden fyldlinjer - og tom, hvis overskriften allerede siger det hele."""
+    from .parser import _DROP
+
+    lines = [ln.strip() for ln in lesson["content"].split("\n")]
+    lines = [ln for ln in lines if ln and not _DROP.match(ln)]
+    text = "\n".join(lines)
+    if len(lines) <= 1 and len(text) <= 90:
+        return ""
+    return text
 
 
 def _summary(lesson: dict) -> str:
@@ -66,7 +81,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
             if entry is None:
                 known = set(main_items)
                 outputs.call_service("todo", "add_item", {
-                    "entity_id": MAIN, "item": summ, "due_date": d["date"], "description": l["content"]})
+                    "entity_id": MAIN, "item": summ, "due_date": d["date"], "description": _description(l)})
                 main_items = {i["uid"]: i for i in _items(MAIN)}
                 new = [i for uid, i in main_items.items()
                        if uid not in known and i.get("summary") == summ and i.get("due") == d["date"]]
@@ -79,7 +94,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
                 item = main_items.get(entry["uid"])
                 if item and item.get("status") == "needs_action":
                     outputs.call_service("todo", "update_item", {
-                        "entity_id": MAIN, "item": entry["uid"], "rename": summ, "description": l["content"]})
+                        "entity_id": MAIN, "item": entry["uid"], "rename": summ, "description": _description(l)})
                     stats["updated"] += 1
                 entry["hash"] = h
 
