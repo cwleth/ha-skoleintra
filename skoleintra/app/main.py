@@ -251,7 +251,7 @@ def run_once(o: dict, dry_run: bool = False) -> int:
         try:
             todo_sync.migrate_legacy(DATA / "todo_sync.json")
             st = todo_sync.sync(diary, today, DATA / "todo_sync.json")
-            extra["backlog"] = (st["backlog_total"], None)
+            extra["backlog"] = (st["backlog_total"], {"items": st["backlog_items"]})
         except Exception as e:  # to-do må ikke vælte sensorerne
             log.warning("To-do-synkronisering fejlede: %s", e)
     outputs.publish({

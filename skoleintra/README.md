@@ -34,7 +34,7 @@ Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i H
 
 ## Dag-sensorer (til dashboardet)
 - `sensor.skoleintra_dag_1` … `_7`: state = antal lektier den dag (afkrydsede tæller med), `-1` = ingen dag i pladsen. Attributter: `date`, `notes`, `full` (lærerens fulde tekst pr. fag, til fold-ud).
-- `sensor.skoleintra_backlog`: antal poster i backlog inkl. afkrydsede.
+- `sensor.skoleintra_backlog`: antal poster i backlog inkl. afkrydsede. Attribut `items` (summary, description, done) til læse-pop-up.
 
 Sensorerne er retained MQTT og overlever genstart af HA.
 

@@ -217,7 +217,10 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
     state = {k: v for k, v in state.items() if v.get("date", "") >= cutoff}
     state_file.write_text(json.dumps(state, ensure_ascii=False), "utf-8")
     log.info("To-do: %s", ", ".join(f"{k} {v}" for k, v in stats.items()))
-    stats["backlog_total"] = len(_items(BACKLOG))
+    bl = _items(BACKLOG)
+    stats["backlog_total"] = len(bl)
+    stats["backlog_items"] = [{"summary": i.get("summary", ""), "description": i.get("description") or "",
+                               "done": i.get("status") == "completed"} for i in bl]
     return stats
 
 
