@@ -25,7 +25,7 @@ BACKLOG = "todo.lektier_backlog"
 LEGACY = "todo.lektier"          # tidligere samleliste - tømmes ved migrering
 KEEP_BACKLOG_DONE_DAYS = 14
 SUMMARY_MAX = 38                 # én linje i to-do-kortet på en telefon (~390 px)
-VERSION = "4"   # hæves -> åbne/afkrydsede poster i dag-listerne genskabes i nyt format
+VERSION = "5"   # hæves -> åbne/afkrydsede poster i dag-listerne genskabes i nyt format
 
 
 def _items(entity: str) -> list[dict]:
