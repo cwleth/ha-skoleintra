@@ -7,7 +7,8 @@ GDPR-regler (Christians krav):
   erstattes, handlingslinjen er kun et udsnit omkring nøgleordet, og URL'er/e-mails/telefonnumre fjernes.
 - Sortering med lokale regler (ingen AI/cloud).
 - Notifikations-endpoints røres ikke (de peger kun på beskeder/opslag, og seen-endpoints må ikke kaldes).
-- Beskeder indgår ikke endnu (afventer test af læsestatus).
+- Beskeder: kun emne/dato/ulæst + udtræk af seneste besked; hentning markerer ikke som læst (verificeret).
+- Kontaktbog: kun lærernes noter; afsender og barnenavn læses ikke.
 - Loggen får kun antal.
 """
 
@@ -320,6 +321,40 @@ def fetch_messages(si: SkoleIntra, seen: set[str], today: date, stored: dict) ->
     return entries, new_seen
 
 
+def fetch_contactbook(si: SkoleIntra, seen: set[str], today: date) -> tuple[list[dict], set[str]]:
+    """Kontaktbog (/contactbook/notes): kun lærernes noter (ikke forældrenes svar). Afsender og "For: <barn>"-linjen læses ikke.
+    Kun dato + tekstudtræk (scrubbet) gemmes."""
+    soup = BeautifulSoup(_get(si, "contactbook/notes"), "lxml")
+    entries, new_seen = [], set()
+    boxes = soup.select("div.sk-contactbook-note-container")
+    for box in boxes:
+        if "answer" in (box.get("class") or []):
+            continue
+        d = box.select_one(".sk-contactbook-note-date")
+        note = box.select_one("div.sk-contactbook-note")
+        if d is None or note is None:
+            continue
+        paras = [p.get_text(" ", strip=True) for p in note.find_all("p")]
+        text = "\n".join(t for t in paras if t)
+        if not text:
+            continue
+        when = parse_when(d.get_text(" ", strip=True), today)
+        if when < today - timedelta(days=21):
+            continue
+        eid = _eid("kontaktbog", f"{when.isoformat()}:{hashlib.sha1(text.encode()).hexdigest()[:10]}")
+        if eid in seen:
+            continue
+        acts = action_lines(text, today, 1)
+        due = (acts[0]["due"] if acts else None) or (find_date(text, today).isoformat() if find_date(text, today) else None)
+        first = re.split(r"(?<=[.!?])\s+|\n+", text.strip())[0]
+        entries.append({"id": eid, "channel": "kontaktbog", "date": when.isoformat(), "topic": scrub(first, 60) or "Kontaktbog",
+                        "action": acts[0]["line"] if acts else None, "due": due,
+                        "kind": "handle" if acts else "info"})
+        new_seen.add(eid)
+    log.info("Kontaktbog: %d noter på siden, %d nye", len(boxes), len(entries))
+    return entries, new_seen
+
+
 # ---------------------------------------------------------------- tilstand
 def _load(path: Path) -> dict:
     try:
@@ -366,10 +401,20 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
     new += es
     seen |= ns
     time.sleep(PAUSE_S)
+    ct_baseline = not st.get("ct_done")
+    try:
+        es, ns = fetch_contactbook(si, seen, today)
+    except Exception as e:  # kontaktbog må ikke vælte resten
+        log.warning("Kontaktbog fejlede: %s", e.__class__.__name__)
+        es, ns = [], set()
+    new += es
+    seen |= ns
+    time.sleep(PAUSE_S)
     cal = fetch_calendar(si, today)
 
     pushed = [e for e in new if e["kind"] == "handle" and e["id"] not in stored
               and not (e["channel"] == "besked" and msg_baseline)
+              and not (e["channel"] == "kontaktbog" and ct_baseline)
               and not (reset and e["channel"] in ("opslag", "opslagstavle"))]   # første beskedsweep giver ikke push
     for e in new:
         log.info("  ny: %s %s dato=%s relevant=%s", e["channel"], e["kind"], e["date"], _relevant(e, today))
@@ -391,11 +436,11 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
     handle = [e for e in keep if e["kind"] == "handle"][:MAX_HANDLE]
     info = sorted((e for e in keep if e["kind"] == "info"), key=lambda e: e["date"], reverse=True)[:MAX_INFO]
 
-    state_file.write_text(json.dumps({"seen": sorted(seen), "entries": keep, "msg_done": True, "v": STATE_V}, ensure_ascii=False), "utf-8")
+    state_file.write_text(json.dumps({"seen": sorted(seen), "entries": keep, "msg_done": True, "ct_done": True, "v": STATE_V}, ensure_ascii=False), "utf-8")
     log.info("Skole: %d skal handles på, %d godt at vide, %d nye handlingsposter%s",
              len(handle), len(info), len(pushed), " (baseline, ingen push)" if baseline else "")
     attrs = {"handle": handle, "info": info, "opdateret": datetime.now().astimezone().isoformat(timespec="seconds"),
-             "kilder": "opslag, opslagstavle, beskeder, kalender"}
+             "kilder": "opslag, opslagstavle, beskeder, kontaktbog, kalender"}
     return (str(len(handle)), attrs), ([] if baseline else pushed)
 
 
