@@ -26,7 +26,7 @@ Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i H
 ## To-do-lister (én pr. skoledag)
 - `todo.lektier_dag_1` … `todo.lektier_dag_5` – rullende: dag 1 er første dag fra i dag med lektier, dag 2 den næste osv. Hver morgen rykker posterne op, og afkrydsning følger med.
 - `todo.lektier_backlog` – lektier der ikke er krydset af, når dagen er passeret.
-- Kun én kort linje pr. lektie (≤ 44 tegn), ingen beskrivelse. Fag "Info" springes over.
+- Kun én kort linje pr. lektie (≤ 38 tegn; lange tekster med sidetal bliver til fx "Skakbogen s. 14+15"), ingen beskrivelse. Fag "Info" springes over.
 - Sensoren `sensor.skoleintra_lektier` har attributten `slots` (datoen for dag 1-5) til dashboard-overskrifter.
 - Slå fra med `todo_sync: false`.
 

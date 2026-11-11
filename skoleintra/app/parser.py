@@ -348,8 +348,24 @@ def short_text(content: str, max_len: int = SHORT_MAX) -> str:
         out = " · ".join([segs[0]] + [x for x in segs[1:] if re.search(r"\d", x)])
     if len(out) > max_len:
         first = re.split(r"(?<=[a-zæøå0-9]{2})\.\s", out, maxsplit=1)[0]  # første sætning (ikke "s. 17")
-        out = first if len(first) <= max_len else out[: max_len - 1].rsplit(" ", 1)[0] + "…"
+        out = first if len(first) <= max_len else (_pages_only(out, max_len)
+                                                   or out[: max_len - 1].rsplit(" ", 1)[0] + "…")
     return out
+
+
+_BOOK = re.compile(r"\b(Topic Book|Task Book|[a-zæøå]*(?:bogen|hæftet))\b", re.I)
+_REF = re.compile(r"\bs\.\s*(\d+(?:[+\-]\d+)?)", re.I)
+
+
+def _pages_only(text: str, max_len: int) -> str:
+    """For lang tekst med sidetal -> 'Skakbogen s. 14+15'. Bedre end en sætning klippet midt over."""
+    refs = _REF.findall(text)
+    if not refs:
+        return ""
+    book = _BOOK.search(text)
+    out = (f"{book.group(1)} " if book else "") + "s. " + "+".join(refs)
+    out = out[:1].upper() + out[1:]
+    return out if len(out) <= max_len else ""
 
 
 def add_short(diary: dict) -> dict:

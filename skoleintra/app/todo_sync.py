@@ -110,11 +110,18 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
         if entry.get("list") == BACKLOG:
             continue
         item = find(entry)
-        done = bool(item and item.get("status") == "completed") or entry.get("done", False)
-        if item is None and entry.get("list") in SLOTS:
-            # slettet manuelt i HA - genopret ikke
-            entry.update(list=None, done=True)
+        # Listens status vinder: fjerner barnet et flueben, skal det også følge med ved flytning
+        done = (item.get("status") == "completed") if item is not None else entry.get("done", False)
+        if item is None and entry.get("list") in SLOTS and entry.get("uid"):
+            # slettet manuelt i HA - genopret ikke (medmindre læreren ændrer teksten)
+            entry.update(list=None, uid=None, deleted=True)
             continue
+        if entry.get("deleted"):
+            target = wanted.get(key)
+            if target and target[3] != entry.get("hash"):
+                entry.pop("deleted")          # læreren har ændret lektien -> vis den igen
+            else:
+                continue
         if entry["date"] < today.isoformat():
             if item:
                 if not done:
@@ -134,7 +141,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
                 state.pop(key)
             continue
         slot, summ, due, h = target
-        if entry.get("list") != slot or entry.get("v") != VERSION:
+        if entry.get("list") != slot or entry.get("v") != VERSION or item is None:
             if item:
                 _remove(entry["list"], entry["uid"])
             entry.update(list=slot, uid=_add(slot, summ, None, done), hash=h, done=done, v=VERSION)
