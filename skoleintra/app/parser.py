@@ -191,9 +191,10 @@ def _cell_text(cell) -> str:
     return html_to_text(str(cell).replace("%", "%25"))  # html_to_text unquoter - beskyt '%'
 
 
-def _items_from_user_input(box) -> tuple[list[dict], str | None]:
-    """Returnér (punkter, duks). Tabelrækker -> fag/tekst, øvrig tekst -> 'Info'."""
-    items, duks = [], None
+def _items_from_user_input(box) -> list[dict]:
+    """Tabelrækker -> fag/tekst, øvrig tekst -> 'Info'.
+    DUKSE-rækken springes over uden at blive læst: den indeholder andre børns navne (GDPR)."""
+    items = []
     tables = box.find_all("table")
     for table in tables:
         for tr in table.find_all("tr"):
@@ -201,6 +202,8 @@ def _items_from_user_input(box) -> tuple[list[dict], str | None]:
             if not cells:
                 continue
             subject = _cell_text(cells[0]).strip().rstrip(":").strip()
+            if subject.lower().startswith("duks"):
+                continue  # andre børns navne - cellerne læses aldrig
             text = "\n".join(t for t in (_cell_text(c) for c in cells[1:]) if t).strip()
             if subject.lower() in HEADER_WORDS:
                 # Overskriftsrække - men lærere skriver nogle gange en note i den.
@@ -209,9 +212,6 @@ def _items_from_user_input(box) -> tuple[list[dict], str | None]:
                 ).strip()
                 if note:
                     items.append({"subject": "Info", "content": note})
-                continue
-            if subject.lower().startswith("duks"):
-                duks = text or None
                 continue
             if not text:
                 if subject and len(cells) == 1:
@@ -223,7 +223,7 @@ def _items_from_user_input(box) -> tuple[list[dict], str | None]:
     rest = _cell_text(box).strip()
     if rest:
         items.insert(0, {"subject": "Info", "content": rest})
-    return items, duks
+    return items
 
 
 def parse_diary(html: str) -> dict:
@@ -241,8 +241,7 @@ def parse_diary(html: str) -> dict:
         user_input = box.find(class_="sk-user-input")
         if d is None or user_input is None:
             continue
-        items, duks = _items_from_user_input(user_input)
-        days.append({"date": d.isoformat(), "label": label, "lessons": items, "duks": duks})
+        days.append({"date": d.isoformat(), "label": label, "lessons": _items_from_user_input(user_input)})
     days.sort(key=lambda x: x["date"])
     return {"title": title_el.strip() if title_el else "Lektiebog", "days": days}
 

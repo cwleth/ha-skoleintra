@@ -264,7 +264,6 @@ def run_once(o: dict, dry_run: bool = False) -> int:
         "naeste_skoledag": ((nxt["label"] if nxt else "Ingen lektier"),
                             {"date": nxt["date"] if nxt else None,
                              "lessons": nxt["lessons"] if nxt else [],
-                             "duks": nxt.get("duks") if nxt else None,
                              "markdown": next_md}),
         "status": ("ok", {"besked": f"Hentet lektiebog {did}", "tidspunkt": now_iso()}),
         "sidst_hentet": (now_iso(), None),
