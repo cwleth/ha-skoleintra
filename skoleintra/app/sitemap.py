@@ -40,11 +40,18 @@ def mask(text: str, n: int = 60) -> str:
 
 
 def mask_path(path: str) -> str:
-    """Behold rene ord-segmenter ('/parent/<id>/<barn>/messages'); maskér filnavne o.l.
+    """Behold rene ord-segmenter ('/parent/<id>/<barn>/messages/getinitailconversations', 'v1');
+    maskér filnavne, id'er med bogstaver o.l. Querystring: navne beholdes, værdier maskeres.
     Barnets eget navn står i alle stier og er ikke tredjepersons data."""
+    path, _, query = path.partition("?")
     segs = path.split("/")
-    return "/".join(sg if re.fullmatch(r"[a-z_\-]*|\d+|[A-Z][a-z]+(item)?", sg) and "." not in sg and len(sg) < 25
-                    and not (len(segs) > 2 and segs[1].lower() in ("file", "faelles")) else mask(sg, 40) for sg in segs)
+    private = len(segs) > 2 and segs[1].lower() in ("file", "faelles")
+    keep = lambda sg: (not private and "." not in sg and
+                       re.fullmatch(r"[a-z_\-]+|[a-z]+\d+|\d+|[A-Z][a-z]+(item)?|[a-zA-Z]+|\{\d+\}", sg or "") is not None) or sg == ""
+    out = "/".join(sg if keep(sg) else mask(sg, 40) for sg in segs)
+    if query:
+        out += "?" + "&".join(f"{k}={mask(v, 20)}" for k, _, v in (q.partition("=") for q in query.split("&")))
+    return out
 
 
 def _mask_json(v, depth=0):
@@ -128,7 +135,7 @@ def script_urls(soup) -> list[str]:
     found = []
     for sc in soup.find_all("script"):
         for m in _SCRIPT_URL.finditer(sc.string or ""):
-            u = mask_path(m.group(1).split("?")[0])
+            u = mask_path(m.group(1))
             if u not in found:
                 found.append(u)
     return found[:60]
