@@ -339,7 +339,7 @@ def short_text(content: str) -> str:
             break
         out = cand
     if len(out) > SHORT_MAX:
-        first = re.split(r"(?<=[a-zæøå0-9])\.\s", out, maxsplit=1)[0]  # første sætning
+        first = re.split(r"(?<=[a-zæøå0-9]{2})\.\s", out, maxsplit=1)[0]  # første sætning (ikke "s. 17")
         out = first if len(first) <= SHORT_MAX else out[: SHORT_MAX - 1].rsplit(" ", 1)[0] + "…"
     return out
 

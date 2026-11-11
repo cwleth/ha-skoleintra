@@ -281,7 +281,20 @@ def report_failure(o: dict, e: Exception) -> None:
     save_json(DATA / "last_status.json", {"status": status})
 
 
+MIN_INTERVAL_S = 300  # forsvar mod løkker: aldrig to rigtige hentninger inden for 5 min
+
+
+def too_soon() -> bool:
+    last = load_json(DATA / "last_fetch.json", {}).get("ts", 0)
+    return time.time() - last < MIN_INTERVAL_S
+
+
 def safe_run(o: dict, dry_run: bool = False) -> int:
+    if not dry_run:
+        if too_soon():
+            log.warning("Springer over: sidste hentning var for under %d min siden", MIN_INTERVAL_S // 60)
+            return 0
+        save_json(DATA / "last_fetch.json", {"ts": time.time()})
     try:
         rc = run_once(o, dry_run)
         if not dry_run:
@@ -330,6 +343,13 @@ def schedule(o: dict) -> int:
 
 
 # ---------------------------------------------------------------- main
+def idle(rc: int) -> int:
+    """Faste kørsler afslutter ikke: watchdog ville genstarte dem i en løkke."""
+    log.info("Færdig (rc=%s). Skift mode til schedule for drift - venter i tomgang.", rc)
+    while True:
+        time.sleep(3600)
+
+
 def main() -> int:
     o = load_json(OPTIONS, None)
     if o is None:
@@ -357,18 +377,22 @@ def main() -> int:
         log.info("Slettede discover-dump %s (exists=%s)", dump_dir, dump_dir.exists())
     if mode == "discover":
         try:
-            return discover(o)
+            rc = discover(o)
         except SkoleIntraError as e:
             report_failure(o, e)
-            return 1
+            rc = 1
+        return IDLE(rc)
     if mode == "dry-run":
-        return safe_run(o, dry_run=True)
+        return IDLE(safe_run(o, dry_run=True))
     if mode == "once":
-        return safe_run(o)
+        return IDLE(safe_run(o))
     if mode == "schedule":
         return schedule(o)
     log.error("Ukendt mode: %s", mode)
     return 1
+
+
+IDLE = idle  # kan udskiftes i tests
 
 
 if __name__ == "__main__":
