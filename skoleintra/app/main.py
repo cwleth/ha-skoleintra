@@ -20,7 +20,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from . import ai, outputs, parser, todo_sync
+from . import ai, outputs, parser, sitemap, todo_sync
 from .client import LoginBlocked, LoginRejected, SkoleIntra, SkoleIntraError, UnsupportedLogin
 
 DATA = Path(os.environ.get("SI_DATA_DIR", "/data"))
@@ -391,6 +391,13 @@ def main() -> int:
     if mode == "discover":
         try:
             rc = discover(o)
+        except SkoleIntraError as e:
+            report_failure(o, e)
+            rc = 1
+        return IDLE(rc)
+    if mode == "map":
+        try:
+            rc = sitemap.run(make_client(o))
         except SkoleIntraError as e:
             report_failure(o, e)
             rc = 1

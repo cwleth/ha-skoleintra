@@ -1,7 +1,7 @@
 configuration:
   mode:
     name: Mode
-    description: "discover = dump sider til /share/skoleintra_dump. dry-run = test uden HA. once = én kørsel. schedule = drift."
+    description: "discover = dump sider til /share/skoleintra_dump. map = kortlæg sider uden indhold (kun maskeret struktur i loggen). dry-run = test uden HA. once = én kørsel. schedule = drift."
   base_url:
     name: Skolens SkoleIntra-adresse
   username:
