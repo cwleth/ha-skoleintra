@@ -31,6 +31,7 @@ log = logging.getLogger("skoleintra.skole")
 PAUSE_S = 3
 MAX_NEW_ARTICLES = 8
 MAX_NEW_MESSAGES = 6
+STATE_V = 2
 CAL_DAYS = 21
 KEEP_DAYS = 45
 MAX_HANDLE, MAX_INFO = 20, 30
@@ -333,6 +334,9 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
     """Returnerer ((sensor-state, attributter), nye "skal handles"-poster). Første kørsel giver ingen nye."""
     st = _load(state_file)
     baseline = not st
+    reset = bool(st) and st.get("v") != STATE_V      # datoparsing rettet: hent opslag igen én gang (uden push)
+    if reset:
+        st = {**st, "seen": [], "entries": [e for e in st.get("entries", []) if e["channel"] in ("kalender", "besked")]}
     seen = set(st.get("seen", []))
     stored = {e["id"]: e for e in st.get("entries", [])}
 
@@ -356,7 +360,8 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
     cal = fetch_calendar(si, today)
 
     pushed = [e for e in new if e["kind"] == "handle" and e["id"] not in stored
-              and not (e["channel"] == "besked" and msg_baseline)]   # første beskedsweep giver ikke push
+              and not (e["channel"] == "besked" and msg_baseline)
+              and not (reset and e["channel"] in ("opslag", "opslagstavle"))]   # første beskedsweep giver ikke push
     for e in new:
         log.info("  ny: %s %s dato=%s relevant=%s", e["channel"], e["kind"], e["date"], _relevant(e, today))
     for e in new:
@@ -377,7 +382,7 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
     handle = [e for e in keep if e["kind"] == "handle"][:MAX_HANDLE]
     info = sorted((e for e in keep if e["kind"] == "info"), key=lambda e: e["date"], reverse=True)[:MAX_INFO]
 
-    state_file.write_text(json.dumps({"seen": sorted(seen), "entries": keep, "msg_done": True}, ensure_ascii=False), "utf-8")
+    state_file.write_text(json.dumps({"seen": sorted(seen), "entries": keep, "msg_done": True, "v": STATE_V}, ensure_ascii=False), "utf-8")
     log.info("Skole: %d skal handles på, %d godt at vide, %d nye handlingsposter%s",
              len(handle), len(info), len(pushed), " (baseline, ingen push)" if baseline else "")
     attrs = {"handle": handle, "info": info, "opdateret": datetime.now().astimezone().isoformat(timespec="seconds"),
