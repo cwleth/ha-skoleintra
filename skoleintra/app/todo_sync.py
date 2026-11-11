@@ -92,10 +92,14 @@ def slot_sensors(diary: dict, today: date) -> dict:
     for i in range(len(SLOTS)):
         if i < len(days):
             d = days[i]
-            out[f"dag_{i + 1}"] = (len(homework(d)), {"date": d["date"],
-                                                     "notes": [note_text(l) for l in d["lessons"] if is_note(l)]})
+            out[f"dag_{i + 1}"] = (len(homework(d)), {
+                "date": d["date"],
+                "notes": [note_text(l) for l in d["lessons"] if is_note(l)],
+                # Lærerens fulde tekst til fold-ud på dashboardet
+                "full": [{"subject": l["subject"], "content": l["content"]} for l in d["lessons"]],
+            })
         else:
-            out[f"dag_{i + 1}"] = (-1, {"date": None, "notes": []})
+            out[f"dag_{i + 1}"] = (-1, {"date": None, "notes": [], "full": []})
     return out
 
 
