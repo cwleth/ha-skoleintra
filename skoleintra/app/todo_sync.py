@@ -26,7 +26,7 @@ BACKLOG = "todo.lektier_backlog"
 LEGACY = "todo.lektier"          # tidligere samleliste - tømmes ved migrering
 KEEP_BACKLOG_DONE_DAYS = 14
 SUMMARY_MAX = 38                 # én linje i to-do-kortet på en telefon (~390 px)
-VERSION = "5"   # hæves -> åbne/afkrydsede poster i dag-listerne genskabes i nyt format
+VERSION = "6"   # hæves -> åbne/afkrydsede poster i dag-listerne genskabes i nyt format
 
 
 def _items(entity: str) -> list[dict]:
@@ -103,12 +103,15 @@ def slot_sensors(diary: dict, today: date) -> dict:
     return out
 
 
-def _add(entity: str, summ: str, due: str | None, done: bool = False) -> str | None:
-    """due=None for dag-listerne: dagen står i overskriften, så frist under hver linje er støj."""
+def _add(entity: str, summ: str, due: str | None, done: bool = False, description: str | None = None) -> str | None:
+    """due=None for dag-listerne: dagen står i overskriften, så frist under hver linje er støj.
+    description = lærerens fulde tekst; skjules i listen og vises i pop-up ved tryk."""
     known = {i["uid"] for i in _items(entity)}
     data = {"entity_id": entity, "item": summ}
     if due:
         data["due_date"] = due
+    if description:
+        data["description"] = description
     outputs.call_service("todo", "add_item", data)
     new = [i for i in _items(entity) if i["uid"] not in known and i.get("summary") == summ]
     if not new:
@@ -144,7 +147,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
     wanted = {}
     for idx, d in enumerate(slot_days(diary, today)):
         for l in homework(d):
-            wanted[f"{d['date']}|{l['subject']}"] = (SLOTS[idx], summary(l), d["date"], _hash(l["content"]))
+            wanted[f"{d['date']}|{l['subject']}"] = (SLOTS[idx], summary(l), d["date"], _hash(l["content"]), l["content"])
 
     # 1: eksisterende poster - passerede, flyttede, ændrede, fjernede
     for key, entry in list(state.items()):
@@ -166,7 +169,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
         if entry["date"] < today.isoformat():
             if item:
                 if not done:
-                    _add(BACKLOG, item["summary"], entry["date"])
+                    _add(BACKLOG, item["summary"], entry["date"], description=item.get("description"))
                     stats["backlog"] += 1
                 _remove(entry["list"], entry["uid"])
             entry.update(list=BACKLOG if not done else None, uid=None, done=done)
@@ -181,23 +184,23 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
             else:
                 state.pop(key)
             continue
-        slot, summ, due, h = target
+        slot, summ, due, h, full = target
         if entry.get("list") != slot or entry.get("v") != VERSION or item is None:
             if item:
                 _remove(entry["list"], entry["uid"])
-            entry.update(list=slot, uid=_add(slot, summ, None, done), hash=h, done=done, v=VERSION)
+            entry.update(list=slot, uid=_add(slot, summ, None, done, full), hash=h, done=done, v=VERSION)
             stats["moved"] += 1
         elif entry.get("hash") != h and item and not done:
             outputs.call_service("todo", "update_item",
-                                 {"entity_id": slot, "item": entry["uid"], "rename": summ})
+                                 {"entity_id": slot, "item": entry["uid"], "rename": summ, "description": full})
             entry["hash"] = h
             stats["updated"] += 1
 
     # 2: nye lektier
-    for key, (slot, summ, due, h) in wanted.items():
+    for key, (slot, summ, due, h, full) in wanted.items():
         if key in state:
             continue
-        state[key] = {"list": slot, "uid": _add(slot, summ, None), "hash": h, "date": due, "done": False, "v": VERSION}
+        state[key] = {"list": slot, "uid": _add(slot, summ, None, description=full), "hash": h, "date": due, "done": False, "v": VERSION}
         stats["added"] += 1
 
     # 3: oprydning - afkrydsede backlog-poster bliver stående (overstreget) resten af dagen

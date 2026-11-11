@@ -28,6 +28,7 @@ Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i H
 - Afkrydsede lektier bliver stående (overstreget), indtil dagen er gået. Herefter fjernes de, og åbne lektier flyttes til `todo.lektier_backlog`.
 - Backlog: afkrydsede poster bliver stående resten af dagen og ryddes næste morgen.
 - **Info vs. lektier:** faget "Info" og varsler ("lektie … til næste uge" uden "i dag") bliver ikke til to-do-poster. De vises som noter på dagen via `sensor.skoleintra_dag_N`.
+- Lærerens fulde tekst ligger i postens beskrivelse (vises i pop-up ved tryk, når kortet har `item_tap_action: edit`).
 - Én kort linje pr. lektie (≤ 38 tegn; lange tekster med sidetal bliver til fx "Skakbogen s. 14+15").
 - Slå fra med `todo_sync: false`.
 
