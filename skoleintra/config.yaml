@@ -1,5 +1,5 @@
 name: SkoleIntra
-version: "0.10.1"
+version: "0.11.0"
 slug: skoleintra
 description: Henter lektier fra ForældreIntras lektiebog ind i Home Assistant
 arch:

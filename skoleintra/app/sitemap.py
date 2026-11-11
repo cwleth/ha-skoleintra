@@ -23,7 +23,7 @@ from .client import SkoleIntraError
 
 log = logging.getLogger("skoleintra.map")
 
-KEYWORDS = re.compile(r"messag|besked|notif|news|nyhed|board|opslag|post|calendar|kalender|event|arrangement|signup|tilmeld", re.I)
+KEYWORDS = re.compile(r"messag|besked|notif|news|nyhed|board|opslag|post|calendar|kalender|event|arrangement|signup|tilmeld|kontaktbog|contactbook", re.I)
 # Kun oversigtssider under barnets sti: /parent/<id>/<barn>/<sektion>/<side>[/today]. Ingen tal-segmenter
 # (enkeltbeskeder/-opslag), ingen filer (vedhæftninger som fødselsdagslister), intet under /Faelles eller /file.
 OVERVIEW = re.compile(r"^/parent/\d+/[^/]+/[a-z]+/[a-zA-Z_]+(/today)?/?$")

@@ -30,6 +30,7 @@ log = logging.getLogger("skoleintra.skole")
 
 PAUSE_S = 3
 MAX_NEW_ARTICLES = 8
+MAX_NEW_MESSAGES = 6
 CAL_DAYS = 21
 KEEP_DAYS = 45
 MAX_HANDLE, MAX_INFO = 20, 30
@@ -126,9 +127,33 @@ def _body_title(row) -> tuple[str, str]:
     return title, body
 
 
+def parse_when(text: str | None, today: date) -> date:
+    """Dato fra SkoleIntras tekster: '10. nov. 2026', '10. nov.', 'i går', 'for 2 dage siden'. Aldrig i fremtiden."""
+    t = (text or "").strip()
+    d = parser.parse_danish_date(t)
+    if d is None and (iso := re.match(r"(\d{4})-(\d{2})-(\d{2})", t)):
+        try:
+            d = date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
+        except ValueError:
+            d = None
+    low = t.lower()
+    if d is None:
+        if "i dag" in low:
+            d = today
+        elif "i g\xe5r" in low or "for en dag" in low or "for 1 dag" in low:
+            d = today - timedelta(days=1)
+        elif (m := re.search(r"for (\d+) dag", low)):
+            d = today - timedelta(days=int(m.group(1)))
+        else:
+            d = find_date(t, today)
+            if d and d > today:
+                d = date(d.year - 1, d.month, d.day)
+    return d or today
+
+
 def _published(row, today: date) -> date:
     ts = row.select_one(".sk-news-item-header .sk-news-item-timestamp")
-    return (parser.parse_danish_date(ts.get_text(" ", strip=True)) if ts else None) or today
+    return parse_when(ts.get_text(" ", strip=True) if ts else "", today)
 
 
 def fetch_news(si: SkoleIntra, seen: set[str], today: date) -> tuple[list[dict], set[str]]:
@@ -232,6 +257,59 @@ def fetch_calendar(si: SkoleIntra, today: date) -> list[dict]:
     return out
 
 
+def fetch_messages(si: SkoleIntra, seen: set[str], today: date, stored: dict) -> tuple[list[dict], set[str]]:
+    """Beskeder fra listen (emne, dato, ulæst) + brødtekst af seneste besked i nye tråde.
+    Verificeret 11-11-2026: hentning af en tråd markerer den IKKE som læst. Afsendere/modtagere læses ikke."""
+    from . import msgprobe
+
+    soup = BeautifulSoup(_get(si, "messages/conversations"), "lxml")
+    el = soup.find(attrs={msgprobe.ATTR: True})
+    try:
+        convs = (json.loads(el[msgprobe.ATTR]).get("Conversations") or []) if el is not None else []
+    except ValueError:
+        convs = []
+    entries, new_seen, bodies = [], set(), 0
+    for c in convs:
+        lm = c.get("LatestMessageId")
+        if not lm:
+            continue
+        key = str(c.get("ThreadId") or lm)
+        eid = _eid("besked", f"{key}:{lm}")
+        unread = bool(c.get("IsUnread"))
+        when = parse_when(str(c.get("Date") or ""), today)
+        if eid in stored:                       # kendt: opdatér kun ulæst-status
+            stored[eid]["unread"] = unread
+            continue
+        if eid in seen:                         # allerede behandlet (og siden udløbet)
+            continue
+        if not unread and when < today - timedelta(days=21):
+            continue
+        if bodies >= MAX_NEW_MESSAGES:
+            continue                              # resten tages næste kørsel
+        bodies += 1
+        time.sleep(PAUSE_S)
+        try:
+            if c.get("ThreadId"):
+                msgs = msgprobe._ajax_get(si, "messages/conversations/loadmessagesforselectedconversation", {
+                    "threadId": c["ThreadId"], "takeFromRootMessageId": str(lm), "takeToMessageId": "0", "searchRequest": ""})
+            else:
+                msgs = msgprobe._ajax_get(si, "messages/conversations/getmessageforthreadlessconversation", {"messageId": str(lm)})
+            latest = max((m for m in msgs if isinstance(m, dict)), key=lambda m: int(m.get("Id") or 0))
+            body = parser.html_to_text(latest.get("BaseText"))   # kun seneste besked, ikke citerede tidligere
+        except Exception as e:  # en enkelt tråd må ikke vælte resten
+            log.warning("Besked: tråd sprunget over (%s)", e.__class__.__name__)
+            continue
+        subject = str(c.get("Subject") or "")
+        acts = action_lines(body, today, 1) or action_lines(subject, today, 1)
+        due = (acts[0]["due"] if acts else None) or (find_date(subject, today).isoformat() if find_date(subject, today) else None)
+        entries.append({"id": eid, "channel": "besked", "date": when.isoformat(), "topic": scrub(subject, 60) or "Besked",
+                        "action": acts[0]["line"] if acts else None, "due": due,
+                        "kind": "handle" if acts else "info", "unread": unread})
+        new_seen.add(eid)
+    log.info("Beskeder: %d i listen, %d ulæste, %d nye hentet", len(convs), sum(bool(c.get("IsUnread")) for c in convs), len(entries))
+    return entries, new_seen
+
+
 # ---------------------------------------------------------------- tilstand
 def _load(path: Path) -> dict:
     try:
@@ -241,9 +319,14 @@ def _load(path: Path) -> dict:
 
 
 def _relevant(e: dict, today: date) -> bool:
+    if e.get("unread") and e["date"] >= (today - timedelta(days=KEEP_DAYS)).isoformat():
+        return True                               # ulæste beskeder bliver, til de er læst
     ref = e.get("due") or e["date"]
-    limit = (today - timedelta(days=7 if e["kind"] == "handle" else 1)).isoformat()
-    return ref >= limit and e["date"] >= (today - timedelta(days=KEEP_DAYS)).isoformat()
+    if e["kind"] == "handle":
+        days = 7
+    else:
+        days = 1 if e["channel"] == "kalender" else 14   # opslag/beskeder er nyttige et par uger
+    return ref >= (today - timedelta(days=days)).isoformat() and e["date"] >= (today - timedelta(days=KEEP_DAYS)).isoformat()
 
 
 def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict], list[dict]]:
@@ -260,9 +343,22 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
         new += es
         seen |= ns
     time.sleep(PAUSE_S)
+    msg_baseline = not st.get("msg_done")
+    try:
+        es, ns = fetch_messages(si, seen, today, stored)
+    except Exception as e:  # beskeder må ikke vælte opslag og kalender
+        log.warning("Beskeder fejlede: %s", e.__class__.__name__)
+        es, ns = [], set()
+    msg_new = es
+    new += es
+    seen |= ns
+    time.sleep(PAUSE_S)
     cal = fetch_calendar(si, today)
 
-    pushed = [e for e in new if e["kind"] == "handle" and e["id"] not in stored]
+    pushed = [e for e in new if e["kind"] == "handle" and e["id"] not in stored
+              and not (e["channel"] == "besked" and msg_baseline)]   # første beskedsweep giver ikke push
+    for e in new:
+        log.info("  ny: %s %s dato=%s relevant=%s", e["channel"], e["kind"], e["date"], _relevant(e, today))
     for e in new:
         stored[e["id"]] = e
     for e in cal:
@@ -281,11 +377,11 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
     handle = [e for e in keep if e["kind"] == "handle"][:MAX_HANDLE]
     info = sorted((e for e in keep if e["kind"] == "info"), key=lambda e: e["date"], reverse=True)[:MAX_INFO]
 
-    state_file.write_text(json.dumps({"seen": sorted(seen), "entries": keep}, ensure_ascii=False), "utf-8")
+    state_file.write_text(json.dumps({"seen": sorted(seen), "entries": keep, "msg_done": True}, ensure_ascii=False), "utf-8")
     log.info("Skole: %d skal handles på, %d godt at vide, %d nye handlingsposter%s",
              len(handle), len(info), len(pushed), " (baseline, ingen push)" if baseline else "")
     attrs = {"handle": handle, "info": info, "opdateret": datetime.now().astimezone().isoformat(timespec="seconds"),
-             "kilder": "opslag, opslagstavle, kalender"}
+             "kilder": "opslag, opslagstavle, beskeder, kalender"}
     return (str(len(handle)), attrs), ([] if baseline else pushed)
 
 
