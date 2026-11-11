@@ -245,6 +245,15 @@ def run_once(o: dict, dry_run: bool = False) -> int:
         print("\n--- ÆNDRINGER ---\n" + ("\n".join(changes) or "(ingen)"))
         return 0
 
+    extra = {}
+    if o.get("todo_sync", True):
+        extra.update(todo_sync.slot_sensors(diary, today))
+        try:
+            todo_sync.migrate_legacy(DATA / "todo_sync.json")
+            st = todo_sync.sync(diary, today, DATA / "todo_sync.json")
+            extra["backlog"] = (st["backlog_total"], None)
+        except Exception as e:  # to-do må ikke vælte sensorerne
+            log.warning("To-do-synkronisering fejlede: %s", e)
     outputs.publish({
         "lektier": (summarize_diary(diary), {**diary, "changes": changes, "condensed": condensed,
                                              "markdown": markdown, "diary_id": did,
@@ -256,13 +265,8 @@ def run_once(o: dict, dry_run: bool = False) -> int:
                              "markdown": next_md}),
         "status": ("ok", {"besked": f"Hentet lektiebog {did}", "tidspunkt": now_iso()}),
         "sidst_hentet": (now_iso(), None),
+        **extra,
     })
-    if o.get("todo_sync", True):
-        try:
-            todo_sync.migrate_legacy(DATA / "todo_sync.json")
-            todo_sync.sync(diary, today, DATA / "todo_sync.json")
-        except Exception as e:  # to-do må ikke vælte sensorerne
-            log.warning("To-do-synkronisering fejlede: %s", e)
     if changes:
         outputs.notify(o["notify_service"], "Lektier opdateret",
                        markdown if condensed else "\n".join(changes[:15]))

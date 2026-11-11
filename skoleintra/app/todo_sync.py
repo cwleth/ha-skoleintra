@@ -1,6 +1,6 @@
 """Synkroniserer lektiebogen til HA-to-do-lister - én liste pr. kommende skoledag.
 
-todo.lektier_dag_1..5  rullende: dag 1 = første dag fra i dag med lektier, dag 2 = næste, ...
+todo.lektier_dag_1..7  rullende: dag 1 = første dag fra i dag med lektier, dag 2 = næste, ...
 todo.lektier_backlog   lektier der ikke er krydset af, når dagen er passeret.
 
 Hver kørsel tildeler lektierne til den rigtige dag-liste. Rykker en dag (fx fra
@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from . import outputs, parser
 
 log = logging.getLogger("skoleintra.todo")
 
-SLOTS = [f"todo.lektier_dag_{i}" for i in range(1, 6)]
+SLOTS = [f"todo.lektier_dag_{i}" for i in range(1, 8)]
 BACKLOG = "todo.lektier_backlog"
 LEGACY = "todo.lektier"          # tidligere samleliste - tømmes ved migrering
 KEEP_BACKLOG_DONE_DAYS = 14
@@ -47,16 +48,54 @@ def summary(lesson: dict) -> str:
     return f"{abbr}: {text or lesson['content'][:SUMMARY_MAX]}"
 
 
+_NEXT_WEEK = re.compile(r"\bnæste uge\b", re.I)
+_TODAY = re.compile(r"\bi ?dag\b", re.I)
+
+
+def is_note(lesson: dict) -> bool:
+    """Info og varsler ('lektie til næste uge') - vises som tekst, kan ikke krydses af.
+    Lektien selv står på den dag, den skal være lavet."""
+    if lesson["subject"] == "Info":
+        return True
+    c = lesson.get("content", "")
+    return bool(_NEXT_WEEK.search(c)) and not _TODAY.search(c)
+
+
+def note_text(lesson: dict) -> str:
+    if lesson["subject"] == "Info":
+        t = parser.short_text(lesson["content"], max_len=90) or lesson["content"][:90]
+        return re.sub(r"\s+i ?dag$", "", t)
+    abbr = lesson.get("abbr") or parser.abbreviate(lesson["subject"])
+    return f"{abbr}: {parser.short_text(lesson['content'], max_len=50)} · til næste uge"
+
+
+def homework(day: dict) -> list[dict]:
+    return [l for l in day.get("lessons", []) if not is_note(l)]
+
+
 def slot_days(diary: dict, today: date) -> list[dict]:
-    """De op til 5 første dage fra i dag, der har lektier (ikke kun Info)."""
+    """De op til 5 første dage fra i dag med indhold (lektier eller info)."""
     out = []
     for d in sorted(diary.get("days", []), key=lambda x: x["date"]):
-        if d["date"] < today.isoformat():
+        if d["date"] < today.isoformat() or not d.get("lessons"):
             continue
-        if any(l["subject"] != "Info" for l in d.get("lessons", [])):
-            out.append(d)
+        out.append(d)
         if len(out) == len(SLOTS):
             break
+    return out
+
+
+def slot_sensors(diary: dict, today: date) -> dict:
+    """sensor.skoleintra_dag_1..7: (antal lektier | -1, {date, notes})."""
+    days = slot_days(diary, today)
+    out = {}
+    for i in range(len(SLOTS)):
+        if i < len(days):
+            d = days[i]
+            out[f"dag_{i + 1}"] = (len(homework(d)), {"date": d["date"],
+                                                     "notes": [note_text(l) for l in d["lessons"] if is_note(l)]})
+        else:
+            out[f"dag_{i + 1}"] = (-1, {"date": None, "notes": []})
     return out
 
 
@@ -100,9 +139,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
     # Ønsket placering: key -> (slot-liste, summary, dato, hash)
     wanted = {}
     for idx, d in enumerate(slot_days(diary, today)):
-        for l in d["lessons"]:
-            if l["subject"] == "Info":
-                continue
+        for l in homework(d):
             wanted[f"{d['date']}|{l['subject']}"] = (SLOTS[idx], summary(l), d["date"], _hash(l["content"]))
 
     # 1: eksisterende poster - passerede, flyttede, ændrede, fjernede
@@ -159,10 +196,12 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
         state[key] = {"list": slot, "uid": _add(slot, summ, None), "hash": h, "date": due, "done": False, "v": VERSION}
         stats["added"] += 1
 
-    # 3: oprydning - gamle afkrydsede i backlog
+    # 3: oprydning - afkrydsede backlog-poster bliver stående (overstreget) resten af dagen
     cutoff = (today - timedelta(days=KEEP_BACKLOG_DONE_DAYS)).isoformat()
     old = [uid for uid, i in lists[BACKLOG].items()
-           if i.get("status") == "completed" and i.get("due") and i["due"] < cutoff]
+           if i.get("status") == "completed"
+           and ((i.get("completed") or "")[:10] < today.isoformat() if i.get("completed")
+                else (i.get("due") or "9999") < cutoff)]
     if old:
         outputs.call_service("todo", "remove_item", {"entity_id": BACKLOG, "item": old})
         stats["cleaned"] += len(old)
@@ -171,6 +210,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
     state = {k: v for k, v in state.items() if v.get("date", "") >= cutoff}
     state_file.write_text(json.dumps(state, ensure_ascii=False), "utf-8")
     log.info("To-do: %s", ", ".join(f"{k} {v}" for k, v in stats.items()))
+    stats["backlog_total"] = len(_items(BACKLOG))
     return stats
 
 

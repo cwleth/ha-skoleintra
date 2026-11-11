@@ -24,11 +24,16 @@ Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i H
 - `sensor.skoleintra_sidst_hentet` – tidsstempel for seneste vellykkede hentning
 
 ## To-do-lister (én pr. skoledag)
-- `todo.lektier_dag_1` … `todo.lektier_dag_5` – rullende: dag 1 er første dag fra i dag med lektier, dag 2 den næste osv. Hver morgen rykker posterne op, og afkrydsning følger med.
-- `todo.lektier_backlog` – lektier der ikke er krydset af, når dagen er passeret.
-- Kun én kort linje pr. lektie (≤ 38 tegn; lange tekster med sidetal bliver til fx "Skakbogen s. 14+15"), ingen beskrivelse. Fag "Info" springes over.
-- Sensoren `sensor.skoleintra_lektier` har attributten `slots` (datoen for dag 1-5) til dashboard-overskrifter.
+- `todo.lektier_dag_1` … `todo.lektier_dag_7` – rullende: dag 1 er første dag fra i dag med indhold, dag 2 den næste osv. Når dagene rykker, flyttes posterne med deres afkrydsning.
+- Afkrydsede lektier bliver stående (overstreget), indtil dagen er gået. Herefter fjernes de, og åbne lektier flyttes til `todo.lektier_backlog`.
+- Backlog: afkrydsede poster bliver stående resten af dagen og ryddes næste morgen.
+- **Info vs. lektier:** faget "Info" og varsler ("lektie … til næste uge" uden "i dag") bliver ikke til to-do-poster. De vises som noter på dagen via `sensor.skoleintra_dag_N`.
+- Én kort linje pr. lektie (≤ 38 tegn; lange tekster med sidetal bliver til fx "Skakbogen s. 14+15").
 - Slå fra med `todo_sync: false`.
+
+## Dag-sensorer (til dashboardet)
+- `sensor.skoleintra_dag_1` … `_7`: state = antal lektier den dag (afkrydsede tæller med), `-1` = ingen dag i pladsen. Attributter: `date`, `notes`.
+- `sensor.skoleintra_backlog`: antal poster i backlog inkl. afkrydsede.
 
 Sensorerne er retained MQTT og overlever genstart af HA.
 
