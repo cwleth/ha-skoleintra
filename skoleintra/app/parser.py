@@ -322,7 +322,7 @@ def _score(line: str) -> int:
     return (3 if _PAGE.search(line) else 0) + (1 if re.search(r"\d", line) else 0) + (1 if line.lower().startswith("husk") else 0)
 
 
-def short_text(content: str) -> str:
+def short_text(content: str, max_len: int = SHORT_MAX) -> str:
     """Én til to linjers essens: de linjer med sidetal/opgaver, så korte som muligt."""
     lines = [ln.strip() for ln in (content or "").split("\n")]
     lines = [ln for ln in lines if ln and not _DROP.match(ln)]
@@ -335,12 +335,12 @@ def short_text(content: str) -> str:
         if not p:
             continue
         cand = f"{out} · {p}" if out else p
-        if len(cand) > SHORT_MAX and out:
+        if len(cand) > max_len and out:
             break
         out = cand
-    if len(out) > SHORT_MAX:
+    if len(out) > max_len:
         first = re.split(r"(?<=[a-zæøå0-9]{2})\.\s", out, maxsplit=1)[0]  # første sætning (ikke "s. 17")
-        out = first if len(first) <= SHORT_MAX else out[: SHORT_MAX - 1].rsplit(" ", 1)[0] + "…"
+        out = first if len(first) <= max_len else out[: max_len - 1].rsplit(" ", 1)[0] + "…"
     return out
 
 

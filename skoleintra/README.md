@@ -23,11 +23,12 @@ Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i H
 - `sensor.skoleintra_status` – ok / login_afvist / login_blokeret / bot_blokeret / login_ikke_understoettet / fejl
 - `sensor.skoleintra_sidst_hentet` – tidsstempel for seneste vellykkede hentning
 
-## To-do-lister
-- `todo.lektier` – én post pr. lektie med lektiedagen som frist (fag "Info" springes over). Barnet krydser selv af.
-- `todo.lektier_backlog` – ikke-afkrydsede lektier flyttes hertil, når fristen er passeret.
-- Lærerrettelser opdaterer åbne poster; fjernede fremtidige lektier fjernes. Afkrydsede ryddes efter 7 dage (backlog: 14).
-- Listerne oprettes som "Lokal to-do" (Lektier, Lektier backlog). Slå fra med `todo_sync: false`.
+## To-do-lister (én pr. skoledag)
+- `todo.lektier_dag_1` … `todo.lektier_dag_5` – rullende: dag 1 er første dag fra i dag med lektier, dag 2 den næste osv. Hver morgen rykker posterne op, og afkrydsning følger med.
+- `todo.lektier_backlog` – lektier der ikke er krydset af, når dagen er passeret.
+- Kun én kort linje pr. lektie (≤ 44 tegn), ingen beskrivelse. Fag "Info" springes over.
+- Sensoren `sensor.skoleintra_lektier` har attributten `slots` (datoen for dag 1-5) til dashboard-overskrifter.
+- Slå fra med `todo_sync: false`.
 
 Sensorerne er retained MQTT og overlever genstart af HA.
 

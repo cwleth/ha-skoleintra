@@ -1,11 +1,11 @@
-"""Synkroniserer lektiebogen til to HA-to-do-lister.
+"""Synkroniserer lektiebogen til HA-to-do-lister - én liste pr. kommende skoledag.
 
-todo.lektier          - én post pr. lektie (fag != Info) med lektiedagen som frist.
-todo.lektier_backlog  - lektier der ikke er krydset af, når fristen er passeret.
+todo.lektier_dag_1..5  rullende: dag 1 = første dag fra i dag med lektier, dag 2 = næste, ...
+todo.lektier_backlog   lektier der ikke er krydset af, når dagen er passeret.
 
-Barnet krydser selv af. Add-on'en ejer kun poster den selv har oprettet
-(sporet via uid i /data/todo_sync.json) og rører ikke manuelt tilføjede poster
-ud over oprydning af gamle afkrydsede.
+Hver kørsel tildeler lektierne til den rigtige dag-liste. Rykker en dag (fx fra
+dag 2 til dag 1 næste morgen), flyttes posten - med sin afkrydsning. barnet
+krydser selv af. Kun egne poster (sporet via uid) røres.
 """
 
 from __future__ import annotations
@@ -16,42 +16,65 @@ import logging
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import outputs
+from . import outputs, parser
 
 log = logging.getLogger("skoleintra.todo")
 
-MAIN = "todo.lektier"
+SLOTS = [f"todo.lektier_dag_{i}" for i in range(1, 6)]
 BACKLOG = "todo.lektier_backlog"
-KEEP_DONE_DAYS = 7      # afkrydsede i hovedlisten ryddes efter en uge
+LEGACY = "todo.lektier"          # tidligere samleliste - tømmes ved migrering
 KEEP_BACKLOG_DONE_DAYS = 14
+SUMMARY_MAX = 44                 # én linje på en telefon
+VERSION = "3"
 
 
 def _items(entity: str) -> list[dict]:
-    resp = outputs.call_service("todo", "get_items", {"entity_id": entity}, return_response=True) or {}
+    try:
+        resp = outputs.call_service("todo", "get_items", {"entity_id": entity}, return_response=True) or {}
+    except Exception as e:  # listen findes måske ikke (fx legacy slettet)
+        log.debug("get_items %s fejlede: %s", entity, e)
+        return []
     return (resp.get(entity) or {}).get("items", [])
 
 
-DESC_VERSION = "2"  # hæv for at genskrive beskrivelser på åbne poster
-
-
 def _hash(text: str) -> str:
-    return hashlib.sha256((DESC_VERSION + text).encode()).hexdigest()[:16]
+    return hashlib.sha256((VERSION + text).encode()).hexdigest()[:16]
 
 
-def _description(lesson: dict) -> str:
-    """Fuld tekst uden fyldlinjer - og tom, hvis overskriften allerede siger det hele."""
-    from .parser import _DROP
-
-    lines = [ln.strip() for ln in lesson["content"].split("\n")]
-    lines = [ln for ln in lines if ln and not _DROP.match(ln)]
-    text = "\n".join(lines)
-    if len(lines) <= 1 and len(text) <= 90:
-        return ""
-    return text
+def summary(lesson: dict) -> str:
+    abbr = lesson.get("abbr") or parser.abbreviate(lesson["subject"])
+    text = parser.short_text(lesson["content"], max_len=max(20, SUMMARY_MAX - len(abbr) - 2))
+    return f"{abbr}: {text or lesson['content'][:SUMMARY_MAX]}"
 
 
-def _summary(lesson: dict) -> str:
-    return f"{lesson.get('abbr') or lesson['subject']}: {lesson.get('short') or lesson['content'][:70]}"
+def slot_days(diary: dict, today: date) -> list[dict]:
+    """De op til 5 første dage fra i dag, der har lektier (ikke kun Info)."""
+    out = []
+    for d in sorted(diary.get("days", []), key=lambda x: x["date"]):
+        if d["date"] < today.isoformat():
+            continue
+        if any(l["subject"] != "Info" for l in d.get("lessons", [])):
+            out.append(d)
+        if len(out) == len(SLOTS):
+            break
+    return out
+
+
+def _add(entity: str, summ: str, due: str, done: bool = False) -> str | None:
+    known = {i["uid"] for i in _items(entity)}
+    outputs.call_service("todo", "add_item", {"entity_id": entity, "item": summ, "due_date": due})
+    new = [i for i in _items(entity) if i["uid"] not in known and i.get("summary") == summ]
+    if not new:
+        log.warning("Kunne ikke finde uid for ny post %r i %s", summ, entity)
+        return None
+    uid = new[0]["uid"]
+    if done:
+        outputs.call_service("todo", "update_item", {"entity_id": entity, "item": uid, "status": "completed"})
+    return uid
+
+
+def _remove(entity: str, uid: str) -> None:
+    outputs.call_service("todo", "remove_item", {"entity_id": entity, "item": [uid]})
 
 
 def _load(path: Path) -> dict:
@@ -63,75 +86,101 @@ def _load(path: Path) -> dict:
 
 def sync(diary: dict, today: date, state_file: Path) -> dict:
     state = _load(state_file)
-    stats = {"added": 0, "updated": 0, "removed": 0, "moved": 0, "cleaned": 0}
-    main_items = {i["uid"]: i for i in _items(MAIN)}
+    stats = {"added": 0, "moved": 0, "updated": 0, "removed": 0, "backlog": 0, "cleaned": 0}
+    lists = {e: {i["uid"]: i for i in _items(e)} for e in SLOTS + [BACKLOG, LEGACY]}
 
-    # 1-2: tilføj nye / opdater ændrede (kun åbne poster i hovedlisten)
-    current_keys = set()
-    for d in diary.get("days", []):
-        if d["date"] < today.isoformat():
-            continue
-        for l in d.get("lessons", []):
+    def find(entry):
+        it = lists.get(entry.get("list"), {}).get(entry.get("uid"))
+        return it
+
+    # Ønsket placering: key -> (slot-liste, summary, dato, hash)
+    wanted = {}
+    for idx, d in enumerate(slot_days(diary, today)):
+        for l in d["lessons"]:
             if l["subject"] == "Info":
                 continue
-            key = f"{d['date']}|{l['subject']}"
-            current_keys.add(key)
-            summ, h = _summary(l), _hash(l["content"])
-            entry = state.get(key)
-            if entry is None:
-                known = set(main_items)
-                outputs.call_service("todo", "add_item", {
-                    "entity_id": MAIN, "item": summ, "due_date": d["date"], "description": _description(l)})
-                main_items = {i["uid"]: i for i in _items(MAIN)}
-                new = [i for uid, i in main_items.items()
-                       if uid not in known and i.get("summary") == summ and i.get("due") == d["date"]]
-                if new:
-                    state[key] = {"uid": new[0]["uid"], "hash": h, "list": MAIN, "date": d["date"]}
-                    stats["added"] += 1
-                else:
-                    log.warning("Kunne ikke finde uid for ny post %r", summ)
-            elif entry.get("list") == MAIN and entry.get("hash") != h:
-                item = main_items.get(entry["uid"])
-                if item and item.get("status") == "needs_action":
-                    outputs.call_service("todo", "update_item", {
-                        "entity_id": MAIN, "item": entry["uid"], "rename": summ, "description": _description(l)})
-                    stats["updated"] += 1
-                entry["hash"] = h
+            wanted[f"{d['date']}|{l['subject']}"] = (SLOTS[idx], summary(l), d["date"], _hash(l["content"]))
 
-    # 3: fremtidige lektier som læreren har fjernet
+    # 1: eksisterende poster - passerede, flyttede, ændrede, fjernede
     for key, entry in list(state.items()):
-        if entry.get("list") == MAIN and entry["date"] >= today.isoformat() and key not in current_keys:
-            item = main_items.get(entry["uid"])
-            if item and item.get("status") == "needs_action":
-                outputs.call_service("todo", "remove_item", {"entity_id": MAIN, "item": [entry["uid"]]})
+        if entry.get("list") == BACKLOG:
+            continue
+        item = find(entry)
+        done = bool(item and item.get("status") == "completed") or entry.get("done", False)
+        if item is None and entry.get("list") in SLOTS:
+            # slettet manuelt i HA - genopret ikke
+            entry.update(list=None, done=True)
+            continue
+        if entry["date"] < today.isoformat():
+            if item:
+                if not done:
+                    _add(BACKLOG, item["summary"], entry["date"])
+                    stats["backlog"] += 1
+                _remove(entry["list"], entry["uid"])
+            entry.update(list=BACKLOG if not done else None, uid=None, done=done)
+            continue
+        target = wanted.get(key)
+        if target is None:  # fjernet af lærer, eller dagen er røget ud af de 5
+            if item:
+                _remove(entry["list"], entry["uid"])
                 stats["removed"] += 1
-            state.pop(key)
-
-    # 4: overskredne, ikke afkrydsede -> backlog (alle poster med frist, også manuelle)
-    for uid, item in list(main_items.items()):
-        due = item.get("due")
-        if item.get("status") == "needs_action" and due and due < today.isoformat():
-            outputs.call_service("todo", "add_item", {
-                "entity_id": BACKLOG, "item": item["summary"], "due_date": due,
-                "description": item.get("description") or ""})
-            outputs.call_service("todo", "remove_item", {"entity_id": MAIN, "item": [uid]})
-            for entry in state.values():
-                if entry.get("uid") == uid:
-                    entry["list"] = BACKLOG
+            if done:
+                entry.update(list=None, uid=None, done=True)  # husk afkrydsning hvis den kommer igen
+            else:
+                state.pop(key)
+            continue
+        slot, summ, due, h = target
+        if entry.get("list") != slot:
+            if item:
+                _remove(entry["list"], entry["uid"])
+            entry.update(list=slot, uid=_add(slot, summ, due, done), hash=h, done=done)
             stats["moved"] += 1
+        elif entry.get("hash") != h and item and not done:
+            outputs.call_service("todo", "update_item",
+                                 {"entity_id": slot, "item": entry["uid"], "rename": summ})
+            entry["hash"] = h
+            stats["updated"] += 1
 
-    # 5: oprydning af gamle afkrydsede
-    for entity, keep in ((MAIN, KEEP_DONE_DAYS), (BACKLOG, KEEP_BACKLOG_DONE_DAYS)):
-        cutoff = (today - timedelta(days=keep)).isoformat()
-        old = [i["uid"] for i in _items(entity)
-               if i.get("status") == "completed" and i.get("due") and i["due"] < cutoff]
-        if old:
-            outputs.call_service("todo", "remove_item", {"entity_id": entity, "item": old})
-            stats["cleaned"] += len(old)
+    # 2: nye lektier
+    for key, (slot, summ, due, h) in wanted.items():
+        if key in state:
+            continue
+        state[key] = {"list": slot, "uid": _add(slot, summ, due), "hash": h, "date": due, "done": False}
+        stats["added"] += 1
 
-    # tilstand ældre end 30 dage glemmes
+    # 3: oprydning - gamle afkrydsede i backlog
+    cutoff = (today - timedelta(days=KEEP_BACKLOG_DONE_DAYS)).isoformat()
+    old = [uid for uid, i in lists[BACKLOG].items()
+           if i.get("status") == "completed" and i.get("due") and i["due"] < cutoff]
+    if old:
+        outputs.call_service("todo", "remove_item", {"entity_id": BACKLOG, "item": old})
+        stats["cleaned"] += len(old)
+
     cutoff = (today - timedelta(days=30)).isoformat()
     state = {k: v for k, v in state.items() if v.get("date", "") >= cutoff}
     state_file.write_text(json.dumps(state, ensure_ascii=False), "utf-8")
     log.info("To-do: %s", ", ".join(f"{k} {v}" for k, v in stats.items()))
     return stats
+
+
+def migrate_legacy(state_file: Path) -> int:
+    """Tøm den gamle samleliste todo.lektier og glem dens poster, så de oprettes i dag-listerne.
+    Afkrydsninger bevares som 'done' i tilstanden."""
+    state = _load(state_file)
+    legacy = {i["uid"]: i for i in _items(LEGACY)}
+    n = 0
+    for key, entry in list(state.items()):
+        if entry.get("list") == LEGACY:
+            item = legacy.get(entry.get("uid"))
+            done = bool(item and item.get("status") == "completed")
+            if done:
+                state[key] = {"list": None, "uid": None, "hash": "", "date": entry["date"], "done": True}
+            else:
+                state.pop(key)
+            n += 1
+    if legacy:
+        outputs.call_service("todo", "remove_item", {"entity_id": LEGACY, "item": list(legacy)})
+    state_file.write_text(json.dumps(state, ensure_ascii=False), "utf-8")
+    if n or legacy:
+        log.info("Migrerede %d poster fra %s", len(legacy), LEGACY)
+    return n

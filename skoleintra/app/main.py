@@ -247,7 +247,8 @@ def run_once(o: dict, dry_run: bool = False) -> int:
 
     outputs.publish({
         "lektier": (summarize_diary(diary), {**diary, "changes": changes, "condensed": condensed,
-                                             "markdown": markdown, "diary_id": did}),
+                                             "markdown": markdown, "diary_id": did,
+                                             "slots": [d["date"] for d in todo_sync.slot_days(diary, today)]}),
         "naeste_skoledag": ((nxt["label"] if nxt else "Ingen lektier"),
                             {"date": nxt["date"] if nxt else None,
                              "lessons": nxt["lessons"] if nxt else [],
@@ -258,6 +259,7 @@ def run_once(o: dict, dry_run: bool = False) -> int:
     })
     if o.get("todo_sync", True):
         try:
+            todo_sync.migrate_legacy(DATA / "todo_sync.json")
             todo_sync.sync(diary, today, DATA / "todo_sync.json")
         except Exception as e:  # to-do må ikke vælte sensorerne
             log.warning("To-do-synkronisering fejlede: %s", e)
