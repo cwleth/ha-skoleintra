@@ -4,7 +4,7 @@ todo.lektier_dag_1..7  rullende: dag 1 = første dag fra i dag med lektier, dag 
 todo.lektier_backlog   lektier der ikke er krydset af, når dagen er passeret.
 
 Hver kørsel tildeler lektierne til den rigtige dag-liste. Rykker en dag (fx fra
-dag 2 til dag 1 næste morgen), flyttes posten - med sin afkrydsning. barnet
+dag 2 til dag 1 næste morgen), flyttes posten - med sin afkrydsning. Barnet
 krydser selv af. Kun egne poster (sporet via uid) røres.
 """
 

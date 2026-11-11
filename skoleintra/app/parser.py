@@ -391,7 +391,7 @@ _DAYS = {"man": 0, "tir": 1, "ons": 2, "tor": 3, "fre": 4, "lør": 5, "lor": 5, 
 
 
 def parse_subject_days(spec: str | None) -> dict[str, set[int]]:
-    """'Skak:man, Svømning:tir+tor' -> {'skoleskak': {0}, 'svømning': {1, 3}}."""
+    """'Skak:man, Svømning:tir+tor' -> {'skak': {0}, 'svømning': {1, 3}}."""
     rules = {}
     for part in (spec or "").split(","):
         if ":" not in part:
