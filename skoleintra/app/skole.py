@@ -31,7 +31,8 @@ log = logging.getLogger("skoleintra.skole")
 PAUSE_S = 3
 MAX_NEW_ARTICLES = 8
 MAX_NEW_MESSAGES = 6
-STATE_V = 2
+STATE_V = 3
+LINE_MAX = 160
 CAL_DAYS = 21
 KEEP_DAYS = 45
 MAX_HANDLE, MAX_INFO = 20, 30
@@ -86,17 +87,25 @@ def find_date(text: str, today: date) -> date | None:
 
 
 def action_lines(text: str, today: date, max_lines: int = 2) -> list[dict]:
-    """Udsnit (~7 ord før/efter nøgleordet) pr. sætning med handlingsord. Dato søges i hele sætningen."""
+    """Udsnit (~7 ord før/efter nøgleordet) pr. sætning med handlingsord. Dato søges i hele sætningen.
+    Slutter sætningen med ':' følger en liste (fx 'skal medbringe:'): de næste op til 3 linjer tages med."""
     out = []
-    for sent in re.split(r"(?<=[.!?])\s+(?=[A-Z\xc6\xd8\xc5])|\n+", text):
+    parts = [x for x in re.split(r"(?<=[.!?])\s+(?=[A-Z\xc6\xd8\xc5])|\n+", text) if x.strip()]
+    for i, sent in enumerate(parts):
         m = ACTION.search(sent)
         if not m:
             continue
         words = sent.split()
         pos = len(sent[:m.start()].split())
         window = " ".join(words[max(0, pos - 7): pos + 8])
-        due = find_date(sent, today)
-        out.append({"line": scrub(window), "due": due.isoformat() if due else None})
+        scope = sent
+        if sent.rstrip().endswith(":"):
+            follow = [x.strip()[:45] for x in parts[i + 1:i + 4]]
+            # punktum mellem listepunkter: hvert punkt tæller som sætningsstart i scrub (punkter er ting, ikke navne)
+            window += " " + ". ".join(follow)
+            scope += " " + " ".join(follow)
+        due = find_date(scope, today)
+        out.append({"line": scrub(window, LINE_MAX), "due": due.isoformat() if due else None})
         if len(out) >= max_lines:
             break
     return out
@@ -336,7 +345,7 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
     baseline = not st
     reset = bool(st) and st.get("v") != STATE_V      # datoparsing rettet: hent opslag igen én gang (uden push)
     if reset:
-        st = {**st, "seen": [], "entries": [e for e in st.get("entries", []) if e["channel"] in ("kalender", "besked")]}
+        st = {**st, "seen": [], "entries": [e for e in st.get("entries", []) if e["channel"] == "kalender"]}
     seen = set(st.get("seen", []))
     stored = {e["id"]: e for e in st.get("entries", [])}
 
