@@ -283,3 +283,70 @@ def diary_ids(html: str) -> list[str]:
         if m and m.group(1) not in ids:
             ids.append(m.group(1))
     return ids
+
+
+# ---------------------------------------------------------------- korte linjer
+ABBR = {
+    "matematik": "Mat", "dansk": "Dan", "engelsk": "Eng", "engels": "Eng", "tysk": "Tysk",
+    "skoleskak": "Skak", "billedkunst": "Billed", "natur/teknologi": "N/T", "historie": "Hist",
+    "kristendom": "Krist", "kristendomskundskab": "Krist", "idræt": "Idræt", "musik": "Musik",
+    "håndværk og design": "H&D", "madkundskab": "Mad", "info": "Info",
+}
+SHORT_MAX = 70
+_DROP = re.compile(r"^(lektie til i ?dag:?|man kan tilmelde sig.*:|https?://\S+|[_.:\-\s]+)$", re.I)
+_PAGE = re.compile(r"(?<!\w)(s\.?\s*\d|side|sider|sæt|opg\.?|opgave|kapitel|book|bogen|hæfte)", re.I)
+_PREFIX = re.compile(
+    r"^(lektie til i ?dag:?\s*|bemærk\s+|til i ?dag\s+|(til i ?dag )?skal i blive færdige med( to sider)?:?\s*"
+    r"|i skal blive færdige med( to sider)?:?\s*)+", re.I)
+_SUFFIX = re.compile(r"\s*(skal være( lavet)? færdig\.?|skal være lavet færdig\.?)\s*$", re.I)
+
+
+def abbreviate(subject: str) -> str:
+    s = (subject or "").strip()
+    return ABBR.get(s.lower(), s if len(s) <= 6 else s[:5] + ".")
+
+
+def _clean(line: str) -> str:
+    line = re.sub(r"\s*\([^)]*\)", "", line)            # (parenteser) ud
+    line = _PREFIX.sub("", line).strip()
+    line = _SUFFIX.sub("", line).strip()
+    line = re.sub(r"\bside\b", "s.", line, flags=re.I)
+    line = re.sub(r"\s+\.\s+", " · ", line)             # "Topic Book . Læs" -> "Topic Book · Læs"
+    line = re.sub(r"\s{2,}", " ", line).strip(" .")
+    if line.isupper():
+        line = line.capitalize()
+    return line[:1].upper() + line[1:] if line else line
+
+
+def _score(line: str) -> int:
+    return (3 if _PAGE.search(line) else 0) + (1 if re.search(r"\d", line) else 0) + (1 if line.lower().startswith("husk") else 0)
+
+
+def short_text(content: str) -> str:
+    """Én til to linjers essens: de linjer med sidetal/opgaver, så korte som muligt."""
+    lines = [ln.strip() for ln in (content or "").split("\n")]
+    lines = [ln for ln in lines if ln and not _DROP.match(ln)]
+    if not lines:
+        return ""
+    best = max(_score(ln) for ln in lines)
+    picked = [_clean(ln) for ln in lines if _score(ln) == best]
+    out = ""
+    for p in picked:
+        if not p:
+            continue
+        cand = f"{out} · {p}" if out else p
+        if len(cand) > SHORT_MAX and out:
+            break
+        out = cand
+    if len(out) > SHORT_MAX:
+        first = re.split(r"(?<=[a-zæøå0-9])\.\s", out, maxsplit=1)[0]  # første sætning
+        out = first if len(first) <= SHORT_MAX else out[: SHORT_MAX - 1].rsplit(" ", 1)[0] + "…"
+    return out
+
+
+def add_short(diary: dict) -> dict:
+    for d in diary.get("days", []):
+        for l in d.get("lessons", []):
+            l["abbr"] = abbreviate(l["subject"])
+            l["short"] = short_text(l["content"]) or l["content"][:SHORT_MAX]
+    return diary
