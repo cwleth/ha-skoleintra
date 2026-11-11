@@ -24,14 +24,27 @@ from .client import SkoleIntraError
 log = logging.getLogger("skoleintra.map")
 
 KEYWORDS = re.compile(r"messag|besked|notif|news|nyhed|board|opslag|post|calendar|kalender|event|arrangement|signup|tilmeld", re.I)
+# Kun oversigtssider under barnets sti: /parent/<id>/<barn>/<sektion>/<side>[/today]. Ingen tal-segmenter
+# (enkeltbeskeder/-opslag), ingen filer (vedhæftninger som fødselsdagslister), intet under /Faelles eller /file.
+OVERVIEW = re.compile(r"^/parent/\d+/[^/]+/[a-z]+/[a-zA-Z_]+(/today)?/?$")
 MAX_PAGES = 6          # + forside = 7 opslag i alt; SkoleIntra har bot-beskyttelse
 PAUSE_S = 3
 _LETTERS = re.compile(r"[^\W\d_]", re.UNICODE)
+# Kun linktekst inde i SkoleIntras egen menu og faneblade er UI-tekst; alt andet maskeres
+UI_CONTAINERS = re.compile(r"^(sk-l-menu-container|sk-page-tabs-container|ccl-pagetabs)$")
 
 
 def mask(text: str, n: int = 60) -> str:
     t = re.sub(r"\s+", " ", text or "").strip()
     return _LETTERS.sub("x", t[:n])
+
+
+def mask_path(path: str) -> str:
+    """Behold rene ord-segmenter ('/parent/<id>/<barn>/messages'); maskér filnavne o.l.
+    Barnets eget navn står i alle stier og er ikke tredjepersons data."""
+    segs = path.split("/")
+    return "/".join(sg if re.fullmatch(r"[a-z_\-]*|\d+|[A-Z][a-z]+(item)?", sg) and "." not in sg and len(sg) < 25
+                    and not (len(segs) > 2 and segs[1].lower() in ("file", "faelles")) else mask(sg, 40) for sg in segs)
 
 
 def _mask_json(v, depth=0):
@@ -44,7 +57,7 @@ def _mask_json(v, depth=0):
         return [_mask_json(x, depth + 1) for x in v[:3]] + ([f"…+{len(v) - 3}"] if len(v) > 3 else [])
     if isinstance(v, str):
         if v.startswith(("/", "http")) and " " not in v:
-            return urlsplit(v).path or v
+            return mask_path(urlsplit(v).path or v)
         return mask(v, 30)
     return v
 
@@ -74,7 +87,7 @@ def skeleton(root, max_lines: int = 140) -> list[str]:
             c = members[0]
             own = " ".join(t.strip() for t in c.find_all(string=True, recursive=False) if t.strip())
             extra = f" x{len(members)}" if len(members) > 1 else ""
-            href = f" href={urlsplit(c['href']).path}" if c.name == "a" and c.get("href") else ""
+            href = f" href={mask_path(urlsplit(c['href']).path)}" if c.name == "a" and c.get("href") else ""
             out.append(f"{'  ' * depth}{key}{extra}{href}" + (f" '{mask(own, 40)}'" if own else ""))
             walk(c, depth + 1)
 
@@ -94,9 +107,7 @@ def _nav_links(soup, host: str) -> list[tuple[str, str]]:
         if path in seen:
             continue
         seen.add(path)
-        in_nav = a.find_parent(["nav", "header"]) is not None or any(
-            "menu" in " ".join(p.get("class", [])).lower() or "nav" in " ".join(p.get("class", [])).lower()
-            for p in a.parents if getattr(p, "get", None))
+        in_nav = a.find_parent(class_=UI_CONTAINERS) is not None
         text = a.get_text(" ", strip=True)
         links.append((path, text[:40] if in_nav else mask(text, 40)))
     return links
@@ -112,10 +123,10 @@ def run(si) -> int:
     links = _nav_links(soup, host)
     log.info("map: %d links (navigationstekst i klar, øvrig tekst maskeret):", len(links))
     for path, text in links[:150]:
-        log.info("  %-70s %s", path, text)
+        log.info("  %-70s %s", mask_path(path), text)
 
     # Kun oversigtssider - aldrig enkeltbeskeder/-opslag (stier der ender på et id)
-    candidates = sorted({p for p, _ in links if KEYWORDS.search(p) and not re.search(r"/\d+/?$", p)}, key=len)[:MAX_PAGES]
+    candidates = sorted({p for p, _ in links if KEYWORDS.search(p) and OVERVIEW.match(p)}, key=len)[:MAX_PAGES]
     log.info("map: kandidat-sider (%d): %s", len(candidates), candidates)
     for path in candidates:
         time.sleep(PAUSE_S)
