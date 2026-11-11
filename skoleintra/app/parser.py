@@ -312,6 +312,11 @@ def _clean(line: str) -> str:
     line = _SUFFIX.sub("", line).strip()
     line = re.sub(r"\bside\b", "s.", line, flags=re.I)
     line = re.sub(r"\s+\.\s+", " · ", line)             # "Topic Book . Læs" -> "Topic Book · Læs"
+    line = re.sub(r"^(lektie i|lektie til|lektien er)\s+", "", line, flags=re.I)
+    line = re.sub(r"\s*\btil (næste uge|i ?dag|i morgen)\b", "", line, flags=re.I)  # dagen står i overskriften
+    line = re.sub(r"\bs (?=\d)", "s. ", line)                                      # "s 22" -> "s. 22"
+    line = re.sub(r"(\d)\s*(?:\+|og)\s*(\d)", r"\1+\2", line)                     # "5 + 6", "22 og 23" -> "5+6"
+    line = re.sub(r"\s+samt\s+", " + ", line, flags=re.I)
     line = re.sub(r"\s{2,}", " ", line).strip(" .")
     if line.isupper():
         line = line.capitalize()
@@ -338,6 +343,9 @@ def short_text(content: str, max_len: int = SHORT_MAX) -> str:
         if len(cand) > max_len and out:
             break
         out = cand
+    if len(out) > max_len and " · " in out:
+        segs = out.split(" · ")  # behold første led + led med tal (sidetal, sæt)
+        out = " · ".join([segs[0]] + [x for x in segs[1:] if re.search(r"\d", x)])
     if len(out) > max_len:
         first = re.split(r"(?<=[a-zæøå0-9]{2})\.\s", out, maxsplit=1)[0]  # første sætning (ikke "s. 17")
         out = first if len(first) <= max_len else out[: max_len - 1].rsplit(" ", 1)[0] + "…"

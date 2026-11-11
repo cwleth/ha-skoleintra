@@ -24,8 +24,8 @@ SLOTS = [f"todo.lektier_dag_{i}" for i in range(1, 6)]
 BACKLOG = "todo.lektier_backlog"
 LEGACY = "todo.lektier"          # tidligere samleliste - tømmes ved migrering
 KEEP_BACKLOG_DONE_DAYS = 14
-SUMMARY_MAX = 44                 # én linje på en telefon
-VERSION = "3"
+SUMMARY_MAX = 38                 # én linje i to-do-kortet på en telefon (~390 px)
+VERSION = "4"   # hæves -> åbne/afkrydsede poster i dag-listerne genskabes i nyt format
 
 
 def _items(entity: str) -> list[dict]:
@@ -60,9 +60,13 @@ def slot_days(diary: dict, today: date) -> list[dict]:
     return out
 
 
-def _add(entity: str, summ: str, due: str, done: bool = False) -> str | None:
+def _add(entity: str, summ: str, due: str | None, done: bool = False) -> str | None:
+    """due=None for dag-listerne: dagen står i overskriften, så frist under hver linje er støj."""
     known = {i["uid"] for i in _items(entity)}
-    outputs.call_service("todo", "add_item", {"entity_id": entity, "item": summ, "due_date": due})
+    data = {"entity_id": entity, "item": summ}
+    if due:
+        data["due_date"] = due
+    outputs.call_service("todo", "add_item", data)
     new = [i for i in _items(entity) if i["uid"] not in known and i.get("summary") == summ]
     if not new:
         log.warning("Kunne ikke finde uid for ny post %r i %s", summ, entity)
@@ -130,10 +134,10 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
                 state.pop(key)
             continue
         slot, summ, due, h = target
-        if entry.get("list") != slot:
+        if entry.get("list") != slot or entry.get("v") != VERSION:
             if item:
                 _remove(entry["list"], entry["uid"])
-            entry.update(list=slot, uid=_add(slot, summ, due, done), hash=h, done=done)
+            entry.update(list=slot, uid=_add(slot, summ, None, done), hash=h, done=done, v=VERSION)
             stats["moved"] += 1
         elif entry.get("hash") != h and item and not done:
             outputs.call_service("todo", "update_item",
@@ -145,7 +149,7 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
     for key, (slot, summ, due, h) in wanted.items():
         if key in state:
             continue
-        state[key] = {"list": slot, "uid": _add(slot, summ, due), "hash": h, "date": due, "done": False}
+        state[key] = {"list": slot, "uid": _add(slot, summ, None), "hash": h, "date": due, "done": False, "v": VERSION}
         stats["added"] += 1
 
     # 3: oprydning - gamle afkrydsede i backlog
