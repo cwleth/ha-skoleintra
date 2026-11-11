@@ -32,7 +32,7 @@ log = logging.getLogger("skoleintra.skole")
 PAUSE_S = 3
 MAX_NEW_ARTICLES = 8
 MAX_NEW_MESSAGES = 6
-STATE_V = 3
+STATE_V = 4
 LINE_MAX = 160
 CAL_DAYS = 21
 KEEP_DAYS = 45
@@ -50,19 +50,25 @@ ALLOW = {w.lower() for w in (
     "Mandag Tirsdag Onsdag Torsdag Fredag Lørdag Søndag "
     "Januar Februar Marts April Maj Juni Juli August September Oktober November December "
     "Jan Feb Mar Apr Jun Jul Aug Sep Okt Nov Dec Dansk Matematik Engelsk Tysk Idræt Musik").split()}
+OPENERS = {w.lower() for w in (
+    "Der Jeres Jer Til Han Hun Det Den De Vi I Jeg Hej God Godmorgen Goddag Idag Dagens Husk Tak Kære Mange Desværre "
+    "Kan Må Skal Er Har Hvis Vil Venlig Barnet Eleven Eleverne Klassen Husk Husk Husk En Et Ingen Ikke Nu Som Så Men Og "
+    "Også Da Når Her Hvad Hvor Vær Send Sig Giv Tag Ring Skriv Kig Se Læs Gør Lav Medbring Tilmeld Aflever Betal Udfyld Svar "
+    "Frist Deadline Samtykke Påmindelse Information Orientering").split()}
 URL = re.compile(r"(https?://\S+|www\.\S+|\S+@\S+)")
 PHONE = re.compile(r"\+?\d[\d ]{6,}\d")
 
 
-def scrub(text: str, limit: int = 120) -> str:
-    """Fjern URL'er, e-mails, telefonnumre og egennavne (stort bogstav midt i sætning)."""
+def scrub(text: str, limit: int = 120, body: bool = False) -> str:
+    """Fjern URL'er, e-mails, telefonnumre og egennavne (stort bogstav midt i sætning).
+    body=True (løbende tekst): også første ord i en sætning maskeres, medmindre det er et almindeligt dansk ord (OPENERS/ALLOW)."""
     t = PHONE.sub("", URL.sub("", text or ""))
     t = re.sub(r"\s+", " ", t).strip()
     out, start = [], True
     for w in t.split(" "):
         core = re.sub(r"^\W+|\W+$", "", w)
-        if (core and core[0].isupper() and not start and not core.isupper()
-                and core.lower() not in ALLOW):
+        known = core.lower() in ALLOW or (body and (core.lower() in OPENERS or ACTION.fullmatch(core) is not None))
+        if (core and core[0].isupper() and (not start or body) and not core.isupper() and not known):
             w = w.replace(core, "…")
         out.append(w)
         start = w.endswith((".", "!", "?", ":"))
@@ -100,13 +106,14 @@ def action_lines(text: str, today: date, max_lines: int = 2) -> list[dict]:
         pos = len(sent[:m.start()].split())
         window = " ".join(words[max(0, pos - 7): pos + 8])
         scope = sent
+        line = scrub(window, LINE_MAX, body=True)
         if sent.rstrip().endswith(":"):
             follow = [x.strip()[:45] for x in parts[i + 1:i + 4]]
             # punktum mellem listepunkter: hvert punkt tæller som sætningsstart i scrub (punkter er ting, ikke navne)
-            window += " " + ". ".join(follow)
+            line = (line + " " + scrub(". ".join(follow), LINE_MAX)).strip()[:LINE_MAX]
             scope += " " + " ".join(follow)
         due = find_date(scope, today)
-        out.append({"line": scrub(window, LINE_MAX), "due": due.isoformat() if due else None})
+        out.append({"line": line, "due": due.isoformat() if due else None})
         if len(out) >= max_lines:
             break
     return out
@@ -346,8 +353,9 @@ def fetch_contactbook(si: SkoleIntra, seen: set[str], today: date) -> tuple[list
             continue
         acts = action_lines(text, today, 1)
         due = (acts[0]["due"] if acts else None) or (find_date(text, today).isoformat() if find_date(text, today) else None)
-        first = re.split(r"(?<=[.!?])\s+|\n+", text.strip())[0]
-        entries.append({"id": eid, "channel": "kontaktbog", "date": when.isoformat(), "topic": scrub(first, 60) or "Kontaktbog",
+        sents = [x for x in re.split(r"(?<=[.!?])\s+|\n+", text.strip()) if len(x.split()) >= 3]
+        first = sents[0] if sents else text
+        entries.append({"id": eid, "channel": "kontaktbog", "date": when.isoformat(), "topic": scrub(first, 60, body=True) or "Kontaktbog",
                         "action": acts[0]["line"] if acts else None, "due": due,
                         "kind": "handle" if acts else "info"})
         new_seen.add(eid)
@@ -415,7 +423,7 @@ def run(si: SkoleIntra, today: date, state_file: Path) -> tuple[tuple[str, dict]
     pushed = [e for e in new if e["kind"] == "handle" and e["id"] not in stored
               and not (e["channel"] == "besked" and msg_baseline)
               and not (e["channel"] == "kontaktbog" and ct_baseline)
-              and not (reset and e["channel"] in ("opslag", "opslagstavle"))]   # første beskedsweep giver ikke push
+              and not (reset and e["channel"] != "kalender")]   # første beskedsweep giver ikke push
     for e in new:
         log.info("  ny: %s %s dato=%s relevant=%s", e["channel"], e["kind"], e["date"], _relevant(e, today))
     for e in new:
