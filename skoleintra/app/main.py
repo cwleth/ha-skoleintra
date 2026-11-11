@@ -20,7 +20,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from . import ai, outputs, parser
+from . import ai, outputs, parser, todo_sync
 from .client import LoginBlocked, LoginRejected, SkoleIntra, SkoleIntraError, UnsupportedLogin
 
 DATA = Path(os.environ.get("SI_DATA_DIR", "/data"))
@@ -256,6 +256,11 @@ def run_once(o: dict, dry_run: bool = False) -> int:
         "status": ("ok", {"besked": f"Hentet lektiebog {did}", "tidspunkt": now_iso()}),
         "sidst_hentet": (now_iso(), None),
     })
+    if o.get("todo_sync", True):
+        try:
+            todo_sync.sync(diary, today, DATA / "todo_sync.json")
+        except Exception as e:  # to-do må ikke vælte sensorerne
+            log.warning("To-do-synkronisering fejlede: %s", e)
     if changes:
         outputs.notify(o["notify_service"], "Lektier opdateret",
                        markdown if condensed else "\n".join(changes[:15]))

@@ -1,5 +1,5 @@
 name: SkoleIntra
-version: "0.4.1"
+version: "0.5.0"
 slug: skoleintra
 description: Henter lektier fra ForældreIntras lektiebog ind i Home Assistant
 arch:
@@ -34,4 +34,5 @@ schema:
   anthropic_api_key: password?
   ai_model: str
   reset_login_guard: bool
+  todo_sync: bool?
   log_level: list(DEBUG|INFO|WARNING)

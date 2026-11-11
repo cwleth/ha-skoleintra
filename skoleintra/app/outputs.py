@@ -92,3 +92,12 @@ def notify(service: str, title: str, message: str) -> None:
     )
     r.raise_for_status()
     log.info("Notifikation sendt via %s", service)
+
+
+def call_service(domain: str, service: str, data: dict, return_response: bool = False):
+    url = f"{SUPERVISOR}/core/api/services/{domain}/{service}"
+    if return_response:
+        url += "?return_response"
+    r = requests.post(url, headers=_headers(), json=data, timeout=30)
+    r.raise_for_status()
+    return r.json().get("service_response") if return_response else None
