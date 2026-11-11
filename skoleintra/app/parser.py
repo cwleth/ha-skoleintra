@@ -416,6 +416,13 @@ def filter_subject_days(diary: dict, rules: dict[str, set[int]]) -> dict:
     return {**diary, "days": days}
 
 
+def hidden_lessons(raw: dict, filtered: dict) -> list[dict]:
+    """Hvilke fag filter_subject_days fjernede: [{'date', 'subject'}]."""
+    kept = {(d["date"], l["subject"]) for d in filtered["days"] for l in d["lessons"]}
+    return [{"date": d["date"], "subject": l["subject"]} for d in raw["days"] for l in d["lessons"]
+            if (d["date"], l["subject"]) not in kept]
+
+
 def add_short(diary: dict) -> dict:
     for d in diary.get("days", []):
         for l in d.get("lessons", []):

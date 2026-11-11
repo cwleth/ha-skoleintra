@@ -224,8 +224,9 @@ def run_once(o: dict, dry_run: bool = False) -> int:
     now = datetime.now()
     today = now.date()
     did, html = resolve_diary(si, o)
-    diary = parser.upcoming(parser.parse_diary(html), today)
-    diary = parser.add_short(parser.filter_subject_days(diary, parser.parse_subject_days(o.get("subject_days"))))
+    raw = parser.upcoming(parser.parse_diary(html), today)
+    diary = parser.add_short(parser.filter_subject_days(raw, parser.parse_subject_days(o.get("subject_days"))))
+    hidden = parser.hidden_lessons(raw, diary)   # vises på dashboardet, så filteret aldrig skjuler i stilhed
     nxt = parser.next_school_day(diary, today, after_hour=now.hour >= 14)
 
     condensed = None
@@ -258,6 +259,7 @@ def run_once(o: dict, dry_run: bool = False) -> int:
     outputs.publish({
         "lektier": (summarize_diary(diary), {**diary, "changes": changes, "condensed": condensed,
                                              "markdown": markdown, "diary_id": did,
+                                             "hidden": hidden, "subject_days": o.get("subject_days") or "",
                                              "slots": [d["date"] for d in todo_sync.slot_days(diary, today)]}),
         "naeste_skoledag": ((nxt["label"] if nxt else "Ingen lektier"),
                             {"date": nxt["date"] if nxt else None,

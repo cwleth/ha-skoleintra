@@ -33,7 +33,7 @@ Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i H
 - Slå fra med `todo_sync: false`.
 
 ## Fag kun på bestemte dage
-`subject_days: "Skak:man"` sorterer indlæg for faget fra på andre ugedage (fx når lektiebogen indeholder både mandags- og onsdagsholdet). Flere: `"Skak:man, Svømning:tir+tor"`.
+`subject_days: "Skak:man"` sorterer indlæg for faget fra på andre ugedage (fx når lektiebogen indeholder både mandags- og onsdagsholdet). Flere: `"Skak:man, Svømning:tir+tor"`. Det skjulte står i `sensor.skoleintra_lektier` (attributter `hidden`, `subject_days`), så dashboardet kan vise, hvad filteret fjerner.
 
 ## Dag-sensorer (til dashboardet)
 - `sensor.skoleintra_dag_1` … `_7`: state = antal lektier den dag (afkrydsede tæller med), `-1` = ingen dag i pladsen. Attributter: `date`, `notes`, `full` (lærerens fulde tekst pr. fag, til fold-ud).
