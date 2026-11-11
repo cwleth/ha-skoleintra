@@ -21,7 +21,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from . import ai, msgprobe, outputs, parser, sitemap, todo_sync
+from . import ai, msgprobe, outputs, parser, sitemap, skole, todo_sync
 from .client import LoginBlocked, LoginRejected, SkoleIntra, SkoleIntraError, UnsupportedLogin
 
 DATA = Path(os.environ.get("SI_DATA_DIR", "/data"))
@@ -257,6 +257,12 @@ def run_once(o: dict, dry_run: bool = False) -> int:
             extra["backlog"] = (st["backlog_total"], {"items": st["backlog_items"]})
         except Exception as e:  # to-do må ikke vælte sensorerne
             log.warning("To-do-synkronisering fejlede: %s", e)
+    skole_new: list[dict] = []
+    if o.get("skole", True):
+        try:
+            extra["skole"], skole_new = skole.run(si, today, DATA / "skole_state.json")
+        except Exception as e:  # skole-overblikket må ikke vælte lektierne
+            log.warning("Skole-overblik fejlede: %s", e.__class__.__name__ if not isinstance(e, SkoleIntraError) else e)
     outputs.publish({
         "lektier": (summarize_diary(diary), {**diary, "changes": changes, "condensed": condensed,
                                              "markdown": markdown, "diary_id": did,
@@ -273,6 +279,8 @@ def run_once(o: dict, dry_run: bool = False) -> int:
     if changes:
         outputs.notify(o["notify_service"], "Lektier opdateret",
                        markdown if condensed else "\n".join(changes[:15]))
+    if skole_new:
+        outputs.notify(o.get("skole_notify_service") or o["notify_service"], "Skole: skal handles på", skole.push_text(skole_new))
     save_json(DATA / "last_diary.json", diary)
     return 0
 

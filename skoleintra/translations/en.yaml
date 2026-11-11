@@ -33,5 +33,11 @@ configuration:
   msgprobe_unread:
     name: Beskedtest på ULÆST tråd
     description: "Kun til mode msgprobe. Fra = test på en læst tråd (sikkert). Til = test på én ulæst tråd; bliver den læst, sættes den straks tilbage til ulæst."
+  skole:
+    name: Skole-overblik (opslag, opslagstavle, kalender)
+    description: "Udtræk uden navne gemmes lokalt; sensor.skoleintra_skole. Beskeder indgår ikke endnu."
+  skole_notify_service:
+    name: Push-tjeneste til Skole (valgfri)
+    description: "Fx notify.mobile_app_... Tom = bruger notify_service."
   log_level:
     name: Logniveau

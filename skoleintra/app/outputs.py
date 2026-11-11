@@ -29,6 +29,7 @@ SENSORS = {
     # Til dashboardet: state = antal lektier (afkrydsede tæller med), -1 = ingen dag i denne plads.
     # Attributter: date, notes (info/varsler der ikke skal krydses af).
     **{f"dag_{i}": {"name": f"Dag {i}", "icon": "mdi:calendar-blank", "attrs": True} for i in range(1, 8)},
+    "skole": {"name": "Skole", "icon": "mdi:school-outline", "attrs": True},   # state = antal "skal handles på"; attributter handle/info
     "backlog": {"name": "Backlog", "icon": "mdi:alert-circle-outline", "attrs": True},   # alle poster, også afkrydsede; attribut items
 }
 
