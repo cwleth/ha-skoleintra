@@ -26,7 +26,7 @@ Henter lektiebogen fra ForældreIntra (Lektier → Lektiebog) og lægger den i H
 ## To-do-lister (én pr. skoledag)
 - `todo.lektier_dag_1` … `todo.lektier_dag_7` – rullende: dag 1 er første dag fra i dag med indhold, dag 2 den næste osv. Når dagene rykker, flyttes posterne med deres afkrydsning.
 - Afkrydsede lektier bliver stående (overstreget), indtil dagen er gået. Herefter fjernes de, og åbne lektier flyttes til `todo.lektier_backlog`.
-- Backlog: afkrydsede poster bliver stående resten af dagen og ryddes næste morgen.
+- Backlog: afkrydsede poster bliver stående resten af dagen og ryddes næste morgen. Åbne poster får første linje "N dage over tid · skulle laves <dag>" i beskrivelsen (opdateres ved hver kørsel).
 - **Info vs. lektier:** faget "Info" og varsler ("lektie … til næste uge" uden "i dag") bliver ikke til to-do-poster. De vises som noter på dagen via `sensor.skoleintra_dag_N`.
 - Lærerens tekst ligger kondenseret i postens beskrivelse (opgavelinjen først, uden links og støj) - vises med lille skrift under linjen. Den fulde tekst ligger i `sensor.skoleintra_dag_N` (attribut `full`).
 - Én kort linje pr. lektie (≤ 38 tegn; lange tekster med sidetal bliver til fx "Skakbogen s. 14+15").

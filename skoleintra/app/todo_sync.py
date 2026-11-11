@@ -73,6 +73,21 @@ def homework(day: dict) -> list[dict]:
     return [l for l in day.get("lessons", []) if not is_note(l)]
 
 
+_OVERDUE = re.compile(r"^\d+ dage? over tid[^\n]*(\n\n|$)")
+_WD = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
+
+
+def overdue_description(desc: str, due: str, today: date) -> str:
+    """Første linje: '1 dag over tid · skulle laves tirsdag 10/11'. Resten er den oprindelige tekst."""
+    body = _OVERDUE.sub("", desc, count=1)
+    d = date.fromisoformat(due)
+    n = (today - d).days
+    if n < 1:
+        return body
+    line = f"{n} {'dag' if n == 1 else 'dage'} over tid · skulle laves {_WD[d.weekday()]} {d.day}/{d.month}"
+    return f"{line}\n\n{body}" if body else line
+
+
 def slot_days(diary: dict, today: date) -> list[dict]:
     """De op til 5 første dage fra i dag med indhold (lektier eller info)."""
     out = []
@@ -212,6 +227,15 @@ def sync(diary: dict, today: date, state_file: Path) -> dict:
     if old:
         outputs.call_service("todo", "remove_item", {"entity_id": BACKLOG, "item": old})
         stats["cleaned"] += len(old)
+
+    # 4: backlog - "N dage over tid" som første linje i beskrivelsen (HA's kort kan kun vise timer)
+    for it in _items(BACKLOG):
+        if it.get("status") == "completed" or not it.get("due"):
+            continue
+        desc = overdue_description(it.get("description") or "", it["due"][:10], today)
+        if desc != (it.get("description") or ""):
+            outputs.call_service("todo", "update_item", {"entity_id": BACKLOG, "item": it["uid"], "description": desc})
+            stats["overdue"] = stats.get("overdue", 0) + 1
 
     cutoff = (today - timedelta(days=30)).isoformat()
     state = {k: v for k, v in state.items() if v.get("date", "") >= cutoff}
