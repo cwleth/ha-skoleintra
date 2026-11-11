@@ -1,6 +1,7 @@
 """Entrypoint for add-on'en. Mode vælges i konfigurationen:
 
   discover  - log ind, dump sider til /share/skoleintra_dump, afslut
+  msgprobe  - test om hentning af en beskedtråd markerer den som læst
   dry-run   - hent og parse, skriv til loggen, rør ikke HA
   once      - én fuld kørsel (sensor + evt. notifikation), afslut
   schedule  - kør på tidspunkterne i run_at, bliv kørende
@@ -20,7 +21,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from . import ai, outputs, parser, sitemap, todo_sync
+from . import ai, msgprobe, outputs, parser, sitemap, todo_sync
 from .client import LoginBlocked, LoginRejected, SkoleIntra, SkoleIntraError, UnsupportedLogin
 
 DATA = Path(os.environ.get("SI_DATA_DIR", "/data"))
@@ -398,6 +399,17 @@ def main() -> int:
     if mode == "map":
         try:
             rc = sitemap.run(make_client(o))
+        except SkoleIntraError as e:
+            report_failure(o, e)
+            rc = 1
+        return IDLE(rc)
+    if mode == "msgprobe":
+        if too_soon():
+            log.warning("Springer over: sidste hentning var for under %d min siden", MIN_INTERVAL_S // 60)
+            return IDLE(0)
+        save_json(DATA / "last_fetch.json", {"ts": time.time()})
+        try:
+            rc = msgprobe.run(make_client(o), bool(o.get("msgprobe_unread")))
         except SkoleIntraError as e:
             report_failure(o, e)
             rc = 1

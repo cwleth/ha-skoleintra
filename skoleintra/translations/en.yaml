@@ -30,5 +30,8 @@ configuration:
   reset_login_guard:
     name: Nulstil loginværn
     description: "Slå til efter du har tjekket koden manuelt i browseren. Virker én gang - slå fra igen bagefter."
+  msgprobe_unread:
+    name: Beskedtest på ULÆST tråd
+    description: "Kun til mode msgprobe. Fra = test på en læst tråd (sikkert). Til = test på én ulæst tråd; bliver den læst, sættes den straks tilbage til ulæst."
   log_level:
     name: Logniveau

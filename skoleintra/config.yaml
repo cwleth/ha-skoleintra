@@ -1,5 +1,5 @@
 name: SkoleIntra
-version: "0.8.3"
+version: "0.9.0"
 slug: skoleintra
 description: Henter lektier fra ForældreIntras lektiebog ind i Home Assistant
 arch:
@@ -24,7 +24,7 @@ options:
   subject_days: ""
   log_level: INFO
 schema:
-  mode: list(discover|map|dry-run|once|schedule)
+  mode: list(discover|map|msgprobe|dry-run|once|schedule)
   base_url: url
   username: str
   password: password
@@ -37,4 +37,5 @@ schema:
   reset_login_guard: bool
   todo_sync: bool?
   subject_days: str?
+  msgprobe_unread: bool?
   log_level: list(DEBUG|INFO|WARNING)
