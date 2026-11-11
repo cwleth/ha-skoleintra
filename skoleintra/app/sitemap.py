@@ -89,10 +89,49 @@ def skeleton(root, max_lines: int = 140) -> list[str]:
             extra = f" x{len(members)}" if len(members) > 1 else ""
             href = f" href={mask_path(urlsplit(c['href']).path)}" if c.name == "a" and c.get("href") else ""
             out.append(f"{'  ' * depth}{key}{extra}{href}" + (f" '{mask(own, 40)}'" if own else ""))
-            walk(c, depth + 1)
+            walk(max(members, key=lambda m: len(m.find_all(True))), depth + 1)
 
     walk(root, 0)
     return out
+
+
+def url_values(v, path="") -> list[tuple[str, str]]:
+    """Alle streng-værdier der ligner stier/URL-skabeloner, med deres nøglesti (maskeret)."""
+    out = []
+    if isinstance(v, dict):
+        for k, x in v.items():
+            out += url_values(x, f"{path}.{k}" if path else k)
+    elif isinstance(v, list):
+        for i, x in enumerate(v[:1]):
+            out += url_values(x, f"{path}[0]")
+    elif isinstance(v, str) and v.startswith("/") and " " not in v and len(v) < 200:
+        out.append((path, mask_path(v)))
+    return out
+
+
+def list_shapes(v, path="") -> list[str]:
+    """Nøglerne i første element af lister med objekter - strukturen af fx beskedlisten."""
+    out = []
+    if isinstance(v, dict):
+        for k, x in v.items():
+            out += list_shapes(x, f"{path}.{k}" if path else k)
+    elif isinstance(v, list) and v and isinstance(v[0], dict):
+        out.append(f"{path}[{len(v)}]: {sorted(v[0].keys())}")
+        out += list_shapes(v[0], f"{path}[0]")
+    return out
+
+
+_SCRIPT_URL = re.compile(r"[\"'](/(?:parent|notifications|messages|news|calendar|api)[A-Za-z0-9_\-/{}.?=&]*)[\"']")
+
+
+def script_urls(soup) -> list[str]:
+    found = []
+    for sc in soup.find_all("script"):
+        for m in _SCRIPT_URL.finditer(sc.string or ""):
+            u = mask_path(m.group(1).split("?")[0])
+            if u not in found:
+                found.append(u)
+    return found[:60]
 
 
 def _nav_links(soup, host: str) -> list[tuple[str, str]]:
@@ -140,8 +179,13 @@ def run(si) -> int:
         log.info("map: ===== %s -> HTTP %s, %s, %d tegn", path, r.status_code, urlsplit(r.url).path, len(r.text))
         settings = parser.client_settings(r.text)
         for k, v in settings.items():
-            log.info("map: settings[%s] = %s", k, json.dumps(_mask_json(v), ensure_ascii=False)[:1500])
+            for kp, u in url_values(v):
+                log.info("map: url  settings[%s].%s = %s", k, kp, u)
+            for shape in list_shapes(v):
+                log.info("map: list settings[%s].%s", k, shape)
         page = BeautifulSoup(r.text, "lxml")
+        for u in script_urls(page):
+            log.info("map: url  script: %s", u)
         main = page.find("main") or page.find(id="root") or page.body or page
         for tag in main.find_all(["nav", "header", "footer"]):
             tag.decompose()
